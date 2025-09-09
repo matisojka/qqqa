@@ -234,4 +234,4 @@ Project layout:
 
 ## License
 
-Licensed under MIT or Apache 2.0 at your option.
+Licensed under MIT.
