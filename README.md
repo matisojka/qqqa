@@ -45,6 +45,7 @@ You can still use OpenAI or any other OpenAI compatible provider by adding a pro
 - Rich but simple formatting using XML like tags rendered to ANSI colors.
 - Config driven providers and profiles with per profile model overrides.
 - Safety rails for file access and command execution.
+- Optional no-emoji mode persisted via `--no-fun`.
 
 ## Install
 
@@ -92,6 +93,8 @@ Defaults written to `~/.qq/config.json`:
   - `openai` → model `gpt-5-mini`
   - `groq` → model `openai/gpt-oss-20b` (default)
 
+- Optional flag: `no_emoji` (unset by default). Set via `qq --no-fun` or `qa --no-fun`.
+
 You can still override at runtime:
 
 ```sh
@@ -121,6 +124,9 @@ qq -r "explain sed vs awk"
 
 # skip reading terminal history
 qq -n "find large files in the last day"
+
+# disable emojis in responses (persists)
+qq --no-fun "summarize this"
 ```
 
 qq builds a user message that includes a timestamp, your OS, optional recent terminal history, optional piped stdin, and your question. The assistant is instructed to stay on technical topics and to format output using these tags:
@@ -187,6 +193,9 @@ qa "list Rust files under src sorted by size"
 
 # auto approve tool execution for non interactive scripts
 qa -y "count lines across *.rs"
+
+# disable emojis in responses (persists)
+qa --no-fun "format and lint the repo"
 ```
 
 `execute_command` prints the proposed command and asks for confirmation. It warns if the working directory is outside your home. Use `-y` to auto approve in trusted workflows.

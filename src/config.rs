@@ -29,6 +29,10 @@ pub struct Config {
     pub default_profile: String,
     pub model_providers: HashMap<String, ModelProvider>,
     pub profiles: HashMap<String, Profile>,
+    /// Optional flag to control emoji usage in prompts.
+    /// If present and not equal to "0" or "false" (case-insensitive), emojis are disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_emoji: Option<String>,
 }
 
 impl Default for Config {
@@ -67,7 +71,7 @@ impl Default for Config {
             },
         );
 
-        Self { default_profile: "groq".to_string(), model_providers, profiles }
+        Self { default_profile: "groq".to_string(), model_providers, profiles, no_emoji: None }
     }
 }
 
@@ -103,6 +107,25 @@ impl Config {
             fs::write(&path, json).with_context(|| format!("Writing default config: {}", path.display()))?;
             set_permissions_file(&path, debug).ok();
             Ok((cfg, path))
+        }
+    }
+
+    /// Save config back to the given path with pretty JSON and safe permissions.
+    pub fn save(&self, path: &Path, debug: bool) -> Result<()> {
+        let json = serde_json::to_vec_pretty(self).with_context(|| "Serializing config JSON")?;
+        fs::write(path, json).with_context(|| format!("Writing config: {}", path.display()))?;
+        set_permissions_file(path, debug).ok();
+        Ok(())
+    }
+
+    /// Whether the no-emoji flag is effectively enabled.
+    pub fn no_emoji_enabled(&self) -> bool {
+        match &self.no_emoji {
+            None => false,
+            Some(v) => {
+                let v = v.trim().to_ascii_lowercase();
+                !(v.is_empty() || v == "0" || v == "false")
+            }
         }
     }
 

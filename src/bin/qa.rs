@@ -34,6 +34,10 @@ struct Cli {
     #[arg(short = 'y', long = "yes", action = ArgAction::SetTrue)]
     yes: bool,
 
+    /// Disable emojis going forward (persists to config)
+    #[arg(long = "no-fun", action = ArgAction::SetTrue)]
+    no_fun: bool,
+
     /// The task to perform. If omitted, stdin must be piped.
     #[arg(trailing_var_arg = true)]
     task: Vec<String>,
@@ -64,7 +68,14 @@ async fn main() -> Result<()> {
         return Err(anyhow!("No input provided. Pass a task or pipe stdin."));
     }
 
-    let (cfg, _p) = Config::load_or_init(cli.debug)?;
+    let (mut cfg, path) = Config::load_or_init(cli.debug)?;
+    if cli.no_fun {
+        cfg.no_emoji = Some("true".to_string());
+        cfg.save(&path, cli.debug)?;
+        if cli.debug {
+            eprintln!("[debug] Disabled emojis in system prompt (persisted at {}).", path.display());
+        }
+    }
     let eff = match cfg.resolve_profile(cli.profile.as_deref(), cli.model.as_deref()) {
         Ok(eff) => eff,
         Err(e) => {
@@ -83,7 +94,10 @@ async fn main() -> Result<()> {
     }
 
     let history = if cli.no_history { Vec::new() } else { read_recent_history(20, cli.debug) };
-    let system_prompt = build_qa_system_prompt();
+    let mut system_prompt = build_qa_system_prompt();
+    if cfg.no_emoji_enabled() {
+        system_prompt.push_str("\nHard rule: You MUST NOT use emojis anywhere in the response.\n");
+    }
     let user_msg = build_qa_user_message(Some(os_info::get().os_type()), &history, stdin_block.as_deref(), &task);
 
     let client = ChatClient::new(eff.base_url, eff.api_key)?;

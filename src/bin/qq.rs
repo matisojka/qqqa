@@ -17,6 +17,10 @@ struct Cli {
     /// Initialize or reinitialize configuration (~/.qq/config.json) and exit
     #[arg(long = "init", action = ArgAction::SetTrue)]
     init: bool,
+
+    /// Disable emojis going forward (persists to config)
+    #[arg(long = "no-fun", action = ArgAction::SetTrue)]
+    no_fun: bool,
     /// Profile name from config to use
     #[arg(short = 'p', long = "profile")]
     profile: Option<String>,
@@ -57,6 +61,16 @@ async fn main() -> Result<()> {
             eprintln!("[debug] Initialized config at {}", path.display());
         }
         return Ok(());
+    }
+
+    // Apply persistent emoji-disable if requested.
+    if cli.no_fun {
+        let (mut cfg, path) = Config::load_or_init(cli.debug)?;
+        cfg.no_emoji = Some("true".to_string());
+        cfg.save(&path, cli.debug)?;
+        if cli.debug {
+            eprintln!("[debug] Disabled emojis in system prompt (persisted at {}).", path.display());
+        }
     }
 
     // Detect piped stdin and read it if present.
@@ -101,7 +115,10 @@ async fn main() -> Result<()> {
     let history = if cli.no_history { Vec::new() } else { read_recent_history(20, cli.debug) };
 
     // Build system + user messages for formatting/topic control.
-    let system = build_qq_system_prompt();
+    let mut system = build_qq_system_prompt();
+    if cfg.no_emoji_enabled() {
+        system.push_str("\nHard rule: You MUST NOT use emojis anywhere in the response.\n");
+    }
     let user = build_qq_user_message(
         Some(os_info::get().os_type()),
         &history,
