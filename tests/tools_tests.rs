@@ -10,7 +10,7 @@ use std::path::PathBuf;
 fn read_and_write_file_tools_and_path_safety() {
     // Set HOME and CWD to a temp folder for deterministic safety checks.
     let temp = tempfile::tempdir().unwrap();
-    std::env::set_var("HOME", temp.path());
+    unsafe { std::env::set_var("HOME", temp.path()); }
     std::env::set_current_dir(temp.path()).unwrap();
 
     // write_file tool
@@ -48,7 +48,7 @@ fn parse_tool_call_valid_and_invalid() {
 #[serial]
 async fn execute_command_runs_and_captures_output() {
     let temp = tempfile::tempdir().unwrap();
-    std::env::set_var("HOME", temp.path());
+    unsafe { std::env::set_var("HOME", temp.path()); }
     std::env::set_current_dir(temp.path()).unwrap();
 
     let res = qqqa::tools::execute_command::run(

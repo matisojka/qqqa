@@ -15,7 +15,7 @@
 - Debug logs: `RUST_LOG=debug cargo run --bin qq -- -d "..."`.
 
 ## Coding Style & Naming Conventions
-- Rust 2021 edition; format with `rustfmt` (4‑space indents). Prefer `clippy` clean builds.
+- Rust 2024 edition; format with `rustfmt` (4‑space indents). Prefer `clippy` clean builds.
 - Naming: `snake_case` for functions/modules, `PascalCase` for types, `SCREAMING_SNAKE_CASE` for consts.
 - Errors: favor `anyhow` for app layers and `thiserror` for library error types; use `?` over `unwrap()` in binaries.
 - Keep modules focused and functions small; prefer pure helpers in `src/` over ad‑hoc logic in bins.

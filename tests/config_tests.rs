@@ -7,7 +7,7 @@ use std::fs;
 fn load_or_init_creates_default_config_and_permissions() {
     // Use a temp HOME to avoid touching the real user config.
     let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("HOME", dir.path());
+    unsafe { std::env::set_var("HOME", dir.path()); }
 
     let (cfg, path) = Config::load_or_init(true).expect("load_or_init should succeed");
     assert!(path.exists(), "config file should be created");
@@ -29,11 +29,13 @@ fn load_or_init_creates_default_config_and_permissions() {
 #[serial]
 fn resolve_profile_uses_env_api_key_and_overrides() {
     let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("HOME", dir.path());
+    unsafe { std::env::set_var("HOME", dir.path()); }
 
     // Provide env keys for both providers
-    std::env::set_var("GROQ_API_KEY", "test-groq");
-    std::env::set_var("OPENAI_API_KEY", "test-openai");
+    unsafe {
+        std::env::set_var("GROQ_API_KEY", "test-groq");
+        std::env::set_var("OPENAI_API_KEY", "test-openai");
+    }
 
     let (cfg, _path) = Config::load_or_init(false).unwrap();
 
@@ -47,4 +49,3 @@ fn resolve_profile_uses_env_api_key_and_overrides() {
     assert_eq!(eff2.model, "gpt-5-mini");
     assert_eq!(eff2.api_key, "test-openai");
 }
-

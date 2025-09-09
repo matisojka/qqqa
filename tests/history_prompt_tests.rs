@@ -7,7 +7,7 @@ use serial_test::serial;
 #[serial]
 fn history_reader_prefers_existing_files_and_limits() {
     let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("HOME", dir.path());
+    unsafe { std::env::set_var("HOME", dir.path()); }
 
     // Create zsh history with a couple entries
     std::fs::write(
