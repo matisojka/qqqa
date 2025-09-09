@@ -49,18 +49,37 @@ You can still use OpenAI or any other OpenAI compatible provider by adding a pro
 
 ## Install
 
-Build from source with Rust 1.75+:
+Download a prebuilt archive from the `releases/` directory (or the GitHub Releases page) for your platform, then extract and place the binaries on your `PATH`.
+
+Common targets:
+
+- macOS (Intel): `qqqa-vX.Y.Z-x86_64-apple-darwin.tar.gz`
+- macOS (Apple Silicon): `qqqa-vX.Y.Z-aarch64-apple-darwin.tar.gz`
+- Linux (x86_64): `qqqa-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz`
+- Linux (ARM64): `qqqa-vX.Y.Z-aarch64-unknown-linux-gnu.tar.gz`
+
+Example (macOS Apple Silicon):
 
 ```sh
-cargo build --release
+cd /path/to/downloads
+tar -xzf qqqa-v0.7.0-aarch64-apple-darwin.tar.gz
+mkdir -p "$HOME/bin"
+mv qq qa "$HOME/bin/"
+echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.zshrc"
+exec $SHELL -l
+qq --version && qa --version
 ```
 
-The binaries will be in `target/release/qq` and `target/release/qa`. Add them to your `PATH` or use `cargo run` during development.
-
-Optional local install while iterating:
+Example (Linux):
 
 ```sh
-cargo install --path .
+cd /path/to/downloads
+tar -xzf qqqa-v0.7.0-x86_64-unknown-linux-gnu.tar.gz
+mkdir -p "$HOME/.local/bin"
+mv qq qa "$HOME/.local/bin/"
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+exec $SHELL -l
+qq --version && qa --version
 ```
 
 ## Configure
@@ -214,20 +233,6 @@ qa --no-fun "format and lint the repo"
 
 ## Development
 
-Build and run:
-
-```sh
-cargo build
-cargo run --bin qq -- --help
-cargo run --bin qa -- --help
-```
-
-Run tests:
-
-```sh
-cargo test
-```
-
 Project layout:
 
 - `src/bin/qq.rs` and `src/bin/qa.rs` entry points
@@ -237,7 +242,7 @@ Project layout:
 
 ## Contributing
 
-See CONTRIBUTING.md for guidelines on reporting issues and opening pull requests, and for the release process.
+See CONTRIBUTING.md for guidelines on reporting issues and opening pull requests, building from source, and the release process.
 
 ## Releases
 

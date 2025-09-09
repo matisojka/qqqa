@@ -1,0 +1,40 @@
+## Project-local Cargo configuration for convenient cross-compiles
+#
+# Provides handy aliases (e.g., `cargo linux-x64`) and sets linkers for
+# common cross targets so crates that use C/asm (like `ring`) can link cleanly.
+
+[alias]
+# Portable, statically-linked Linux builds (preferred)
+linux-x64 = ["build", "--release", "--target", "x86_64-unknown-linux-musl"]
+linux-aarch64 = ["build", "--release", "--target", "aarch64-unknown-linux-musl"]
+
+# glibc Linux builds (requires GNU cross toolchains)
+linux-x64-gnu = ["build", "--release", "--target", "x86_64-unknown-linux-gnu"]
+linux-aarch64-gnu = ["build", "--release", "--target", "aarch64-unknown-linux-gnu"]
+
+# macOS builds
+darwin-x64 = ["build", "--release", "--target", "x86_64-apple-darwin"]
+darwin-aarch64 = ["build", "--release", "--target", "aarch64-apple-darwin"]
+
+[target.x86_64-unknown-linux-musl]
+linker = "x86_64-linux-musl-gcc"
+ar = "x86_64-linux-musl-ar"
+
+[target.aarch64-unknown-linux-musl]
+linker = "aarch64-linux-musl-gcc"
+ar = "aarch64-linux-musl-ar"
+
+[target.x86_64-unknown-linux-gnu]
+linker = "x86_64-linux-gnu-gcc"
+ar = "x86_64-linux-gnu-ar"
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+ar = "aarch64-linux-gnu-ar"
+
+# Darwin cross from Linux typically needs osxcross; on macOS host, system clang works.
+# [target.x86_64-apple-darwin]
+# linker = "clang"
+# [target.aarch64-apple-darwin]
+# linker = "clang"
+

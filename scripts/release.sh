@@ -12,8 +12,12 @@ set -euo pipefail
 # Usage:
 #   scripts/release.sh v0.7.0 [<git_sha>] [TARGETS="..."]
 #
-# Defaults TARGETS:
-#   x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu
+# Defaults TARGETS depend on host OS and prefer MUSL for Linux cross-builds:
+#   - macOS: x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+#   - Linux: host triple from `rustc -vV` (GNU), plus darwin only if osxcross toolchains are present
+#
+# You can override with TARGETS to include cross targets, but ensure
+# cross C toolchains exist (e.g., aarch64-linux-musl-gcc or aarch64-linux-gnu-gcc).
 
 root_dir=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root_dir"
@@ -32,12 +36,38 @@ else
   ver="$ver_raw"
 fi
 git_sha=${2:-}
-targets_default=(
-  x86_64-apple-darwin
-  aarch64-apple-darwin
-  x86_64-unknown-linux-gnu
-  aarch64-unknown-linux-gnu
-)
+
+# Compute sensible OS-aware defaults to avoid accidental cross builds
+host_os=$(uname -s)
+host_triple=$(rustc -vV 2>/dev/null | awk '/host:/{print $2}')
+case "$host_os" in
+  Darwin)
+    # Build macOS + Linux MUSL by default on macOS for portable Linux binaries
+    targets_default=(x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-linux-musl aarch64-unknown-linux-musl)
+    ;;
+  Linux)
+    if [[ -n "$host_triple" ]]; then
+      targets_default=("$host_triple")
+    else
+      targets_default=(x86_64-unknown-linux-gnu)
+    fi
+    # Attempt Darwin targets only if osxcross toolchains are present
+    if compgen -c | grep -qE '^x86_64-apple-darwin[0-9]*-clang$'; then
+      targets_default+=(x86_64-apple-darwin)
+    fi
+    if compgen -c | grep -qE '^aarch64-apple-darwin[0-9]*-clang$'; then
+      targets_default+=(aarch64-apple-darwin)
+    fi
+    ;;
+  *)
+    # Fallback: just the rust host triple if known
+    if [[ -n "$host_triple" ]]; then
+      targets_default=("$host_triple")
+    else
+      targets_default=(x86_64-unknown-linux-gnu)
+    fi
+    ;;
+esac
 
 IFS=' ' read -r -a targets <<< "${TARGETS:-${targets_default[*]}}"
 
@@ -58,6 +88,68 @@ echo "==> Building targets: ${targets[*]}"
 
 for t in "${targets[@]}"; do
   echo "--> Target: $t"
+  export PKG_CONFIG_ALLOW_CROSS=1
+  cc_tool=""
+  linker_tool=""
+  arch_prefix=""
+  if [[ "$t" == *"-unknown-linux-gnu"* ]]; then
+    # GNU libc toolchain
+    arch_prefix=$(echo "$t" | sed -E 's/-unknown-linux-gnu$//')
+    cc_tool="${arch_prefix}-linux-gnu-gcc"
+    linker_tool="$cc_tool"
+    if ! command -v "$cc_tool" >/dev/null 2>&1; then
+      echo "    WARN: Missing cross C toolchain: $cc_tool (required by ring)." >&2
+      if [[ "$host_os" == "Darwin" ]]; then
+        echo "          Tip: prefer MUSL targets on macOS (install: brew install FiloSottile/musl-cross/musl-cross)" >&2
+      fi
+      echo "          Skipping $t." >&2
+      continue
+    fi
+  elif [[ "$t" == *"-unknown-linux-musl"* ]]; then
+    # MUSL toolchain is best for portable Linux binaries
+    arch_prefix=$(echo "$t" | sed -E 's/-unknown-linux-musl$//')
+    cc_tool="${arch_prefix}-linux-musl-gcc"
+    linker_tool="$cc_tool"
+    if ! command -v "$cc_tool" >/dev/null 2>&1; then
+      echo "    WARN: Missing MUSL cross toolchain: $cc_tool (required by ring)." >&2
+      if [[ "$host_os" == "Darwin" ]]; then
+        echo "          Install via Homebrew: brew install FiloSottile/musl-cross/musl-cross" >&2
+      fi
+      echo "          Skipping $t." >&2
+      continue
+    fi
+  elif [[ "$t" == *"-apple-darwin"* && "$host_os" != "Darwin" ]]; then
+    # Cross-compiling to macOS from Linux typically requires osxcross
+    # Try to find an osxcross clang for the architecture
+    arch_prefix=$(echo "$t" | sed -E 's/-apple-darwin$//')
+    # Probe PATH for any matching clang
+    found=""
+    IFS=: read -ra pths <<< "$PATH"
+    for d in "${pths[@]}"; do
+      for f in "$d/${arch_prefix}-apple-darwin"*-clang; do
+        [[ -x "$f" ]] || continue
+        found="$f"; break
+      done
+      [[ -n "$found" ]] && break
+    done
+    if [[ -z "$found" ]]; then
+      echo "    WARN: No osxcross clang found for $t. Install osxcross and ensure <arch>-apple-darwin*-clang is on PATH. Skipping $t." >&2
+      continue
+    fi
+    cc_tool="$found"
+    linker_tool="$found"
+  fi
+
+  # If we have a cc/linker tool for this target, set env vars cargo/cc understands
+  if [[ -n "$cc_tool" ]]; then
+    cc_var="CC_${t//-/_}"
+    linker_var="CARGO_TARGET_${t//-/_}_LINKER"
+    # shellcheck disable=SC2163
+    export "$cc_var"="$cc_tool"
+    # shellcheck disable=SC2163
+    export "$linker_var"="$linker_tool"
+    echo "    Using CC via $cc_var=$cc_tool and $linker_var=$linker_tool"
+  fi
   if ! rustup target list | grep -q "^${t} (installed)"; then
     echo "    Installing target $t via rustup..."
     rustup target add "$t"
