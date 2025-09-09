@@ -13,6 +13,10 @@ The two binaries are:
 
 By default the repo includes profiles for OpenAI and Groq.
 
+## Names and typing speed
+
+qq means quick question. qa means quick agent. Both are easy to type rapidly on QWERTY keyboards with minimal finger movement. That makes interacting with LLMs faster and more natural during real work.
+
 ## Philosophy
 
 qqqa is deliberately stateless. There is no long running session and no hidden conversation memory stored by the tool. Every run is independent and reproducible.
@@ -112,6 +116,37 @@ qq builds a user message that includes a timestamp, your OS, optional recent ter
 
 The CLI renders these tags as ANSI colored output for readability.
 
+#### Example: forgot the ffmpeg incantation
+
+You want to extract audio from a YouTube video but you do not remember the exact flags.
+
+Ask with qq:
+
+```sh
+qq "how do I use ffmpeg to extract audio from a YouTube video into mp3"
+```
+
+A typical answer will suggest installing the tools and then using `yt-dlp` to fetch audio and `ffmpeg` to convert it:
+
+```sh
+# macOS
+brew install yt-dlp ffmpeg
+
+# Debian or Ubuntu
+sudo apt-get update && sudo apt-get install -y yt-dlp ffmpeg
+
+# Download and extract audio to MP3 using ffmpeg under the hood
+yt-dlp -x --audio-format mp3 "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+Do it for me with qa:
+
+```sh
+qa "download audio as mp3 from https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
+The agent will propose a safe command like `yt-dlp -x --audio-format mp3 URL`, show it for confirmation, then run it. You can pass `-y` to auto approve.
+
 ### qa - do a single step with tools
 
 `qa` can either answer in plain text or request one tool call in JSON. Supported tools:
@@ -182,4 +217,3 @@ Project layout:
 ## License
 
 Licensed under MIT or Apache 2.0 at your option.
-
