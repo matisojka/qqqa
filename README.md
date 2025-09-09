@@ -45,7 +45,7 @@ You can still use OpenAI or any other OpenAI compatible provider by adding a pro
 - Rich but simple formatting using XML like tags rendered to ANSI colors.
 - Config driven providers and profiles with per profile model overrides.
 - Safety rails for file access and command execution.
-- Optional no-emoji mode persisted via `--no-fun`.
+- Old-school and SERIOUS? Optional no-emoji mode persisted via `--no-fun` 🥸
 
 ## Install
 
