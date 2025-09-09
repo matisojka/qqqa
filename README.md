@@ -235,6 +235,56 @@ Project layout:
 - Tools in `src/tools/`: `read_file.rs`, `write_file.rs`, `execute_command.rs`
 - Integration tests in `tests/`
 
+## Contributing
+
+See CONTRIBUTING.md for guidelines on reporting issues and opening pull requests, and for the release process.
+
+## Releases
+
+The repo ships prebuilt binaries under `releases/`. We keep the latest ~3 versions with a simple, script-driven flow.
+
+- Build and package a release:
+
+```sh
+# Build v0.7.0 for common targets and package tar.gz artifacts
+scripts/release.sh v0.7.0
+
+# Optionally specify a Git SHA to record in the manifest (and tag later)
+scripts/release.sh v0.7.0 <git_sha>
+
+# Override targets (space-separated)
+TARGETS="x86_64-apple-darwin aarch64-apple-darwin" scripts/release.sh v0.7.0
+```
+
+What the script does:
+
+- Bumps `Cargo.toml` version to the given one.
+- Builds `qq` and `qa` for each target with `cargo build --release`.
+- Packages `qqqa-v<version>-<target>.tar.gz` into `releases/` and writes checksums.
+- Writes `releases/v<version>/manifest.json` and updates `releases/index.json`.
+- Prunes older versions, keeping the last 3.
+
+Tagging the release:
+
+```sh
+git add Cargo.toml releases/
+git commit -m "release: v0.7.0"
+git tag -a v0.7.0 -m "qqqa v0.7.0"   # or: git tag -a v0.7.0 <sha> -m "qqqa v0.7.0"
+git push && git push --tags
+```
+
+Common targets (customizable via `TARGETS`):
+
+- `x86_64-apple-darwin`
+- `aarch64-apple-darwin`
+- `x86_64-unknown-linux-gnu`
+- `aarch64-unknown-linux-gnu`
+
+Notes:
+
+- Cross-compiling may require additional toolchains; `rustup target add <triple>` is attempted automatically.
+- For fully-static Linux builds, you can adjust targets to `*-unknown-linux-musl` if your environment supports it.
+
 ## Troubleshooting
 
 - API error about missing key: run `qq --init` to set things up, or export the relevant env var, e.g. `export GROQ_API_KEY=...`.
