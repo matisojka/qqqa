@@ -1,6 +1,6 @@
 # qqqa
 
-Fast, stateless LLM for your shell: qq answers; qa runs commands
+Fast, stateless LLM-powered assistant for your shell: qq answers; qa runs commands
 
 ## What is qqqa
 
@@ -243,4 +243,4 @@ Project layout:
 
 ## License
 
-Licensed under MIT or Apache 2.0 at your option.
+Licensed under MIT.
