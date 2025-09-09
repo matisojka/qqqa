@@ -86,6 +86,10 @@ fi
 
 echo "==> Building targets: ${targets[*]}"
 
+# Per-version directory for artifacts and manifest
+manifest_dir="releases/v${ver}"
+mkdir -p "$manifest_dir"
+
 for t in "${targets[@]}"; do
   echo "--> Target: $t"
   export PKG_CONFIG_ALLOW_CROSS=1
@@ -159,7 +163,7 @@ for t in "${targets[@]}"; do
     continue
   }
 
-  outdir="releases/v${ver}/${t}"
+  outdir="${manifest_dir}/${t}"
   mkdir -p "$outdir"
   bin_dir="target/${t}/release"
   cp -f "${bin_dir}/qq" "${outdir}/qq" || true
@@ -169,12 +173,15 @@ for t in "${targets[@]}"; do
   cp -f LICENSE "$outdir/" 2>/dev/null || true
 
   # Package tar.gz per target
-  tarball="releases/qqqa-v${ver}-${t}.tar.gz"
+  tarball="${manifest_dir}/qqqa-v${ver}-${t}.tar.gz"
   tar -C "$outdir" -czf "$tarball" . 2>/dev/null || {
     # Fallback: package what's available
     echo "    Packaging whatever binaries are present for $t"
     tar -C "$outdir" -czf "$tarball" .
   }
+
+  # Cleanup per-target staging directory after packaging
+  rm -rf "$outdir"
 done
 
 # Checksums and manifest
@@ -185,8 +192,6 @@ elif command -v sha256sum >/dev/null 2>&1; then
   checksum_cmd="sha256sum"
 fi
 
-manifest_dir="releases/v${ver}"
-mkdir -p "$manifest_dir"
 manifest_file="${manifest_dir}/manifest.json"
 date_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
@@ -200,7 +205,7 @@ echo "==> Writing manifest ${manifest_file}"
   fi
   echo "  \"artifacts\": ["
   first=1
-  for f in releases/qqqa-v${ver}-*.tar.gz; do
+  for f in "${manifest_dir}"/qqqa-v${ver}-*.tar.gz; do
     [[ -e "$f" ]] || continue
     name=$(basename "$f")
     csum=""
@@ -244,17 +249,6 @@ for v in "${all[@]}"; do
   if [[ " $to_keep_set " != *" $v "* ]]; then
     echo "Pruning releases/$v"
     rm -rf "releases/$v"
-  fi
-done
-
-# Prune orphaned tarballs not in kept versions
-for tb in releases/qqqa-v*.tar.gz; do
-  [[ -e "$tb" ]] || continue
-  b=$(basename "$tb")
-  vt=$(echo "$b" | sed -E 's/^qqqa-(v[0-9][^ -]*)-.*/\1/')
-  if [[ " $to_keep_set " != *" $vt "* ]]; then
-    echo "Pruning tarball $b"
-    rm -f "$tb"
   fi
 done
 

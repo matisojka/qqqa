@@ -1,9 +1,9 @@
 [package]
 name = "qqqa"
 version = "0.7.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-description = "Rust implementation of the qqqa CLI (qq and qa). Implements qq for now."
+edition = "2025"
+license = "MIT"
+description = "qqqa CLI (qq and qa) - fast, stateless LLM in the terminal"
 
 [dependencies]
 anyhow = "1.0"
