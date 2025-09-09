@@ -57,17 +57,7 @@ impl Default for Config {
         let mut profiles = HashMap::new();
         profiles.insert(
             "openai".to_string(),
-            Profile {
-                model_provider: "openai".to_string(),
-                model: "gpt-5".to_string(),
-            },
-        );
-        profiles.insert(
-            "openai-mini".to_string(),
-            Profile {
-                model_provider: "openai".to_string(),
-                model: "gpt-5-mini".to_string(),
-            },
+            Profile { model_provider: "openai".to_string(), model: "gpt-5-mini".to_string() },
         );
         profiles.insert(
             "groq".to_string(),
@@ -144,6 +134,77 @@ impl Config {
 
         Ok(EffectiveProfile { provider_key: provider_key.clone(), model, base_url, api_key })
     }
+
+    /// Interactive initializer that writes a fresh config and allows choosing
+    /// the default profile and optionally storing an API key inline.
+    /// This will overwrite an existing config file.
+    pub fn init_interactive(debug: bool) -> Result<PathBuf> {
+        use std::io::{self, Write};
+
+        let home = dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
+        let dir = home.join(CONFIG_DIR_NAME);
+        let path = dir.join(CONFIG_FILE_NAME);
+
+        if !dir.exists() {
+            fs::create_dir_all(&dir).with_context(|| format!("Creating config dir: {}", dir.display()))?;
+            set_permissions_dir(&dir, debug).ok();
+        }
+
+        let mut cfg = Config::default();
+
+        println!("qqqa init — set up your provider and API key");
+        println!("\nChoose default profile:");
+        println!("  [1] Groq  — openai/gpt-oss-20b (fast, cheap)");
+        println!("  [2] OpenAI — gpt-5-mini (slower, a bit smarter)");
+        print!("Enter 1 or 2 [1]: ");
+        io::stdout().flush().ok();
+        let mut choice = String::new();
+        io::stdin().read_line(&mut choice).ok();
+        let choice = choice.trim();
+        match choice {
+            "2" | "openai" => cfg.default_profile = "openai".to_string(),
+            _ => cfg.default_profile = "groq".to_string(),
+        }
+
+        // Ask for API key for the chosen provider (optional).
+        let provider_key = cfg.default_profile.clone();
+        let provider = cfg
+            .model_providers
+            .get(&provider_key)
+            .ok_or_else(|| anyhow!("Internal error: missing provider {}", provider_key))?
+            .clone();
+
+        let env_hint = provider.env_key.clone();
+        println!(
+            "\nEnter {} (optional). Leave empty to use env var {}.",
+            provider.name, env_hint
+        );
+        print!("{}: ", provider.name);
+        io::stdout().flush().ok();
+        let mut key_in = String::new();
+        io::stdin().read_line(&mut key_in).ok();
+        let key_in = key_in.trim().to_string();
+
+        if !key_in.is_empty() {
+            if let Some(mp) = cfg.model_providers.get_mut(&provider_key) {
+                mp.api_key = Some(key_in);
+            }
+        } else {
+            // No inline key; check if env is present and warn if missing.
+            if std::env::var(&env_hint).is_err() {
+                println!(
+                    "Hint: export {}=YOUR_KEY (e.g., add to your shell profile).",
+                    env_hint
+                );
+            }
+        }
+
+        let json = serde_json::to_vec_pretty(&cfg)?;
+        fs::write(&path, json).with_context(|| format!("Writing config: {}", path.display()))?;
+        set_permissions_file(&path, debug).ok();
+        println!("\nWrote {} with default profile '{}'.", path.display(), cfg.default_profile);
+        Ok(path)
+    }
 }
 
 fn set_permissions_dir(path: &Path, _debug: bool) -> Result<()> {
@@ -167,4 +228,3 @@ fn set_permissions_file(path: &Path, _debug: bool) -> Result<()> {
     }
     Ok(())
 }
-

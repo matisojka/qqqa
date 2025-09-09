@@ -64,17 +64,35 @@ cargo install --path .
 
 ## Configure
 
-On first run qqqa creates `~/.qq/config.json` and enforces safe permissions. It ships with these defaults:
+On first run qqqa creates `~/.qq/config.json` with safe permissions. For a smooth first interaction, run the init flow:
+
+```sh
+# Interactive setup (choose provider and set key)
+qq --init
+# or
+qa --init
+```
+
+The initializer lets you choose the default provider:
+
+- Groq + `openai/gpt-oss-20b` (faster, cheaper)
+- OpenAI + `gpt-5-mini` (slower, a bit smarter)
+
+It also offers to store an API key in the config (optional). If you prefer environment variables, leave it blank and set one of:
+
+- `GROQ_API_KEY` for Groq
+- `OPENAI_API_KEY` for OpenAI
+
+Defaults written to `~/.qq/config.json`:
 
 - Providers
-  - `openai` with base URL `https://api.openai.com/v1` and env key `OPENAI_API_KEY`
-  - `groq` with base URL `https://api.groq.com/openai/v1` and env key `GROQ_API_KEY`
+  - `openai` → base `https://api.openai.com/v1`, env `OPENAI_API_KEY`
+  - `groq` → base `https://api.groq.com/openai/v1`, env `GROQ_API_KEY`
 - Profiles
-  - `openai` using model `gpt-5`
-  - `openai-mini` using model `gpt-5-mini`
-  - `groq` using model `openai/gpt-oss-20b` (default)
+  - `openai` → model `gpt-5-mini`
+  - `groq` → model `openai/gpt-oss-20b` (default)
 
-You can override at runtime:
+You can still override at runtime:
 
 ```sh
 # choose profile
@@ -210,7 +228,7 @@ Project layout:
 
 ## Troubleshooting
 
-- API error about missing key: export the relevant env var, for example `export GROQ_API_KEY=...`.
+- API error about missing key: run `qq --init` to set things up, or export the relevant env var, e.g. `export GROQ_API_KEY=...`.
 - No output when streaming: try `-d` to see debug logs.
 - Piped input not detected: ensure you are piping into `qq` and not running it in a subshell that swallows stdin.
 

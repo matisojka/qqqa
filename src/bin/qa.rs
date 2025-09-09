@@ -11,6 +11,9 @@ use std::io::{Read, Stdin};
 #[derive(Debug, Parser)]
 #[command(name = "qa", disable_colored_help = false, version, about)]
 struct Cli {
+    /// Initialize or reinitialize configuration (~/.qq/config.json) and exit
+    #[arg(long = "init", action = ArgAction::SetTrue)]
+    init: bool,
     /// Profile name from config to use
     #[arg(short = 'p', long = "profile")]
     profile: Option<String>,
@@ -40,6 +43,14 @@ struct Cli {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    if cli.init {
+        let path = Config::init_interactive(cli.debug)?;
+        if cli.debug {
+            eprintln!("[debug] Initialized config at {}", path.display());
+        }
+        return Ok(());
+    }
+
     // Handle stdin piping for extra context.
     let stdin_is_tty = atty::is(atty::Stream::Stdin);
     let stdin_block = if !stdin_is_tty {
@@ -54,7 +65,19 @@ async fn main() -> Result<()> {
     }
 
     let (cfg, _p) = Config::load_or_init(cli.debug)?;
-    let eff = cfg.resolve_profile(cli.profile.as_deref(), cli.model.as_deref())?;
+    let eff = match cfg.resolve_profile(cli.profile.as_deref(), cli.model.as_deref()) {
+        Ok(eff) => eff,
+        Err(e) => {
+            let msg = e.to_string();
+            let mut out = msg.clone();
+            if msg.contains("Missing API key") {
+                out.push_str(
+                    "\n\nFix it quickly:\n- Run `qa --init` and choose provider; optionally paste the API key.\n- Or export an env var, e.g.\n    export GROQ_API_KEY=...  # Groq\n    export OPENAI_API_KEY=... # OpenAI",
+                );
+            }
+            return Err(anyhow!(out));
+        }
+    };
     if cli.debug {
         eprintln!("[debug] Using provider='{}' base_url='{}' model='{}'", eff.provider_key, eff.base_url, eff.model);
     }
