@@ -1,0 +1,13 @@
+[
+{
+  "version": "0.7.0",
+  "date": "2025-09-09T04:20:42Z",
+  "artifacts": [
+    { "file": "qqqa-v0.7.0-aarch64-apple-darwin.tar.gz", "sha256": "83aabca1dd7365869adde1813d218b7bc211e8606b14c016e749ff53fc707689" },
+    { "file": "qqqa-v0.7.0-aarch64-unknown-linux-musl.tar.gz", "sha256": "19cd30c855d5d0532fa950c776d24da91490f8297b2d86416268c29a6393c4b4" },
+    { "file": "qqqa-v0.7.0-x86_64-apple-darwin.tar.gz", "sha256": "214d6b6623f5128ce9dc98a1b915d7f9d89e606768e2329d7d50214a9ebf9fdc" },
+    { "file": "qqqa-v0.7.0-x86_64-unknown-linux-musl.tar.gz", "sha256": "27af09c454601deae2b3af6b9af264980015495c31b70ee4b975645a35b8288f" }
+  ]
+}
+
+]
