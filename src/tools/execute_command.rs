@@ -57,17 +57,7 @@ pub async fn run(args: Args, auto_yes: bool, debug: bool) -> Result<String> {
         }
     }
 
-    // Build shell execution: run via sh -lc to allow pipes and quotes.
-    let mut cmd = Command::new("sh");
-    cmd.arg("-lc")
-        .arg(&args.command)
-        .current_dir(PathBuf::from(cwd));
-    cmd.kill_on_drop(true);
-    cmd.stdin(std::process::Stdio::null());
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
-
-    let child = cmd.spawn().with_context(|| "Failed to spawn command")?;
+    let child = spawn_child(&args.command, cwd, debug)?;
     let run = async {
         let out = child.wait_with_output().await?;
         Result::<std::process::Output>::Ok(out)
@@ -105,6 +95,67 @@ pub async fn run(args: Args, auto_yes: bool, debug: bool) -> Result<String> {
         summary.push('\n');
     }
     Ok(summary)
+}
+
+fn spawn_child(command: &str, cwd: &str, debug: bool) -> Result<tokio::process::Child> {
+    #[cfg(unix)]
+    {
+        let force_script = matches!(
+            std::env::var("QQQA_FORCE_PTY")
+                .ok()
+                .map(|v| v.to_lowercase()),
+            Some(ref v) if v == "1" || v == "true" || v == "yes"
+        );
+        let disable_script = matches!(
+            std::env::var("QQQA_DISABLE_PTY")
+                .ok()
+                .map(|v| v.to_lowercase()),
+            Some(ref v) if v == "1" || v == "true" || v == "yes"
+        );
+        let use_script = force_script || (!disable_script && atty::is(Stream::Stdout));
+        if use_script {
+            match spawn_script_child(command, cwd) {
+                Ok(child) => return Ok(child),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    if debug {
+                        eprintln!("[debug] 'script' not found; falling back to plain sh");
+                    }
+                }
+                Err(err) => {
+                    return Err(anyhow!(err).context("Failed to spawn command via script"));
+                }
+            }
+        }
+    }
+
+    spawn_shell_child(command, cwd).with_context(|| "Failed to spawn command")
+}
+
+fn configure_child(cmd: &mut Command, cwd: &str) {
+    cmd.current_dir(PathBuf::from(cwd));
+    cmd.kill_on_drop(true);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+}
+
+fn spawn_shell_child(command: &str, cwd: &str) -> std::io::Result<tokio::process::Child> {
+    let mut cmd = Command::new("sh");
+    cmd.arg("-lc").arg(command);
+    configure_child(&mut cmd, cwd);
+    cmd.spawn()
+}
+
+#[cfg(unix)]
+fn spawn_script_child(command: &str, cwd: &str) -> std::io::Result<tokio::process::Child> {
+    let mut cmd = Command::new("script");
+    cmd.arg("-q")
+        .arg("/dev/null")
+        .arg("sh")
+        .arg("-lc")
+        .arg(command);
+    configure_child(&mut cmd, cwd);
+    cmd.spawn()
 }
 
 fn prompt_yes_no(prompt: &str) -> Result<bool> {

@@ -101,3 +101,110 @@ async fn execute_command_runs_and_captures_output() {
     assert!(res.contains("stdout"));
     assert!(res.contains("test123"));
 }
+
+#[cfg(unix)]
+#[tokio::test]
+#[serial]
+async fn execute_command_honors_pty_force_flag() {
+    let script_available = std::process::Command::new("which")
+        .arg("script")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !script_available {
+        eprintln!("[test] skipping PTY force coverage; 'script' not available");
+        return;
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    unsafe {
+        std::env::set_var("HOME", temp.path());
+    }
+    std::env::set_current_dir(temp.path()).unwrap();
+
+    let probe = "env sh -lc '[ -t 1 ] && echo tty || echo notty'";
+    let baseline = qqqa::tools::execute_command::run(
+        qqqa::tools::execute_command::Args {
+            command: probe.into(),
+            cwd: None,
+        },
+        true,
+        false,
+    )
+    .await
+    .expect("baseline execute_command should succeed");
+    assert!(baseline.contains("notty"));
+
+    unsafe {
+        std::env::set_var("QQQA_FORCE_PTY", "1");
+    }
+    let forced = qqqa::tools::execute_command::run(
+        qqqa::tools::execute_command::Args {
+            command: probe.into(),
+            cwd: None,
+        },
+        true,
+        false,
+    )
+    .await
+    .expect("execute_command with forced PTY should succeed");
+
+    unsafe {
+        std::env::remove_var("QQQA_FORCE_PTY");
+    }
+
+    assert!(
+        forced.contains("tty"),
+        "expected PTY-enabled command to see a tty, got: {}",
+        forced
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[serial]
+async fn execute_command_falls_back_when_script_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    unsafe {
+        std::env::set_var("HOME", temp.path());
+    }
+    std::env::set_current_dir(temp.path()).unwrap();
+
+    let original_path = std::env::var("PATH").ok();
+    let fallback_dir = std::path::Path::new("/bin");
+    if !fallback_dir.exists() {
+        eprintln!("[test] skipping PTY fallback coverage; /bin not found");
+        return;
+    }
+    unsafe {
+        std::env::set_var("PATH", "/bin");
+        std::env::set_var("QQQA_FORCE_PTY", "1");
+    }
+
+    let probe = "env sh -lc '[ -t 1 ] && echo tty || echo notty'";
+    let res = qqqa::tools::execute_command::run(
+        qqqa::tools::execute_command::Args {
+            command: probe.into(),
+            cwd: None,
+        },
+        true,
+        false,
+    )
+    .await
+    .expect("execute_command fallback should succeed");
+
+    unsafe {
+        if let Some(val) = original_path {
+            std::env::set_var("PATH", val);
+        } else {
+            std::env::remove_var("PATH");
+        }
+        std::env::remove_var("QQQA_FORCE_PTY");
+    }
+
+    assert!(
+        res.contains("notty"),
+        "expected fallback execution to behave like non-PTY run, got: {}",
+        res
+    );
+}
