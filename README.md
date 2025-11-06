@@ -246,35 +246,34 @@ See CONTRIBUTING.md for guidelines on reporting issues and opening pull requests
 
 ## Releases
 
-The repo ships prebuilt binaries under [releases/](https://github.com/matisojka/qqqa/tags).
+Official builds are published through the GitHub Releases page.
 
-- Build and package a release:
+- Build and package a release locally:
 
 ```sh
-# Build v0.8.2 for common targets and package tar.gz artifacts
-scripts/release.sh v0.8.2
+# Build v0.8.3 for macOS (x86_64 + arm64) and Linux MUSL (x86_64 + arm64)
+scripts/release.sh v0.8.3
 
 # Optionally specify a Git SHA to record in the manifest (and tag later)
-scripts/release.sh v0.8.2 <git_sha>
+scripts/release.sh v0.8.3 <git_sha>
 
-# Override targets (space-separated)
-TARGETS="x86_64-apple-darwin aarch64-apple-darwin" scripts/release.sh v0.8.2
+# Override targets (space-separated) if you need a custom set
+TARGETS="x86_64-apple-darwin aarch64-unknown-linux-musl" scripts/release.sh v0.8.3
 ```
 
 What the script does:
 
 - Bumps `Cargo.toml` version to the given one.
-- Builds `qq` and `qa` for each target with `cargo build --release`.
-- Packages `qqqa-v<version>-<target>.tar.gz` into `releases/` and writes checksums.
-- Writes `releases/v<version>/manifest.json` and updates `releases/index.json`.
-- Prunes older versions, keeping the last 3.
+- Builds `qq` and `qa` for each target with `cargo build --release` (default targets cover macOS x86_64/arm64 and Linux MUSL x86_64/arm64).
+- Packages `qqqa-v<version>-<target>.tar.gz` under `target/releases/v<version>/` with checksums.
+- Writes `target/releases/v<version>/manifest.json` for upload.
 
 Tagging the release:
 
 ```sh
-git add Cargo.toml releases/
-git commit -m "release: v0.8.2"
-git tag -a v0.8.2 -m "qqqa v0.8.2"   # or: git tag -a v0.8.2 <sha> -m "qqqa v0.8.2"
+git add Cargo.toml
+git commit -m "release: v0.8.3"
+git tag -a v0.8.3 -m "qqqa v0.8.3"   # or: git tag -a v0.8.3 <sha> -m "qqqa v0.8.3"
 git push && git push --tags
 ```
 

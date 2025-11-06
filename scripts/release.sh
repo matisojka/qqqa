@@ -38,35 +38,12 @@ git_sha=${2:-}
 
 # Compute sensible OS-aware defaults to avoid accidental cross builds
 host_os=$(uname -s)
-host_triple=$(rustc -vV 2>/dev/null | awk '/host:/{print $2}')
-case "$host_os" in
-  Darwin)
-    # Build macOS + Linux MUSL by default on macOS for portable Linux binaries
-    targets_default=(x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-linux-musl aarch64-unknown-linux-musl)
-    ;;
-  Linux)
-    if [[ -n "$host_triple" ]]; then
-      targets_default=("$host_triple")
-    else
-      targets_default=(x86_64-unknown-linux-gnu)
-    fi
-    # Attempt Darwin targets only if osxcross toolchains are present
-    if compgen -c | grep -qE '^x86_64-apple-darwin[0-9]*-clang$'; then
-      targets_default+=(x86_64-apple-darwin)
-    fi
-    if compgen -c | grep -qE '^aarch64-apple-darwin[0-9]*-clang$'; then
-      targets_default+=(aarch64-apple-darwin)
-    fi
-    ;;
-  *)
-    # Fallback: just the rust host triple if known
-    if [[ -n "$host_triple" ]]; then
-      targets_default=("$host_triple")
-    else
-      targets_default=(x86_64-unknown-linux-gnu)
-    fi
-    ;;
-esac
+targets_default=(
+  x86_64-apple-darwin
+  aarch64-apple-darwin
+  x86_64-unknown-linux-musl
+  aarch64-unknown-linux-musl
+)
 
 IFS=' ' read -r -a targets <<< "${TARGETS:-${targets_default[*]}}"
 

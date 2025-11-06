@@ -25,41 +25,40 @@ Prerequisites
 - Optional extra linkers if you aim for musl or uncommon targets.
 
 Quick start (tagging HEAD)
-1) Build and package v0.7.1:
+1) Build and package v0.8.3:
 ```
-scripts/release.sh v0.7.1
+scripts/release.sh v0.8.3
 ```
 2) Commit artifacts and version bump:
 ```
-git add Cargo.toml releases/
-git commit -m "release: v0.7.1"
+git add Cargo.toml
+git commit -m "release: v0.8.3"
 ```
 3) Tag and push:
 ```
-git tag -a v0.7.1 -m "qqqa v0.7.1"
+git tag -a v0.8.3 -m "qqqa v0.8.3"
 git push && git push --tags
 ```
 
 Tag a specific SHA
 ```
-scripts/release.sh v0.7.1 <git_sha>
-git add Cargo.toml releases/
-git commit -m "release: v0.7.1"
-git tag -a v0.7.1 <git_sha> -m "qqqa v0.7.1"
+scripts/release.sh v0.8.3 <git_sha>
+git add Cargo.toml
+git commit -m "release: v0.8.3"
+git tag -a v0.8.3 <git_sha> -m "qqqa v0.8.3"
 git push && git push --tags
 ```
 
 Limit targets
 ```
-TARGETS="x86_64-apple-darwin aarch64-apple-darwin" scripts/release.sh v0.7.1
+TARGETS="x86_64-apple-darwin aarch64-apple-darwin" scripts/release.sh v0.8.3
 ```
 
 What the script does
 - Bumps `Cargo.toml` version to the provided one (normalizes to SemVer).
-- Builds `qq` and `qa` for each target in release mode.
-- Packages `qqqa-v<version>-<target>.tar.gz` into `releases/` with README and LICENSE.
-- Writes `releases/v<version>/manifest.json` and updates `releases/index.json`.
-- Prunes older versions (keeps the latest ~3). Also prunes old tarballs.
+- Builds `qq` and `qa` for macOS (x86_64/arm64) and Linux MUSL (x86_64/arm64) by default; override `TARGETS` if needed.
+- Packages `qqqa-v<version>-<target>.tar.gz` under `target/releases/v<version>/` with README and LICENSE.
+- Writes `target/releases/v<version>/manifest.json` for upload to GitHub Releases.
 
 Notes
 - Cross-compiling across OSes may require appropriate toolchains. The script runs `rustup target add` for the listed targets.
