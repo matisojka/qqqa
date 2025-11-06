@@ -1,5 +1,14 @@
 [
 {
+  "version": "0.8.2",
+  "date": "2025-11-06T10:15:01Z",
+  "artifacts": [
+    { "file": "qqqa-v0.8.2-x86_64-apple-darwin.tar.gz", "sha256": "e487f3747225f21e3a5a6f2aa7c855a21893dcce8f7937dcf643c9b520f910d2" },
+    { "file": "qqqa-v0.8.2-x86_64-unknown-linux-musl.tar.gz", "sha256": "ebe7f8f9af0e8c78c3ba4760fa4fe6cd91021e84a41b9dddf5ef00f74b2347e4" }
+  ]
+}
+,
+{
   "version": "0.8.1",
   "date": "2025-11-06T09:22:45Z",
   "artifacts": [
