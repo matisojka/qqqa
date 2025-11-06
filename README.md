@@ -99,6 +99,21 @@ Defaults written to `~/.qq/config.json`:
 - Profiles
   - `openai` → model `gpt-5-mini`
   - `groq` → model `openai/gpt-oss-20b` (default)
+- Optional per-profile `reasoning_effort` for GPT-5 family models. If you leave it unset, qqqa sends `"reasoning_effort": "minimal"` for any `gpt-5*` model to keep responses fast. Set it to `"low"`, `"medium"`, or `"high"` when you want deeper reasoning.
+
+Example override in `~/.qq/config.json`:
+
+```json
+{
+  "profiles": {
+    "openai": {
+      "model_provider": "openai",
+      "model": "gpt-5-mini",
+      "reasoning_effort": "medium"
+    }
+  }
+}
+```
 
 - Optional flag: `no_emoji` (unset by default). Set via `qq --no-fun` or `qa --no-fun`.
 

@@ -144,7 +144,8 @@ async fn main() -> Result<()> {
         &task,
     );
 
-    let client = ChatClient::new(eff.base_url, eff.api_key)?;
+    let client = ChatClient::new(eff.base_url.clone(), eff.api_key.clone())?
+        .with_reasoning_effort(eff.reasoning_effort.clone());
     // Provide tool specs so the API can emit structured tool_calls instead of erroring.
     let tools_spec = serde_json::json!([
         {

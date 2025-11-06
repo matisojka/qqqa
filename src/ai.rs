@@ -3,8 +3,10 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::time::Duration;
+
+const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 4000;
 
 /// Minimal OpenAI-compatible chat streaming delta payload
 #[derive(Debug, Deserialize)]
@@ -86,6 +88,7 @@ pub struct ChatClient {
     client: Client,
     base_url: String,
     api_key: String,
+    reasoning_effort: Option<String>,
 }
 
 impl ChatClient {
@@ -99,7 +102,64 @@ impl ChatClient {
             client,
             base_url,
             api_key,
+            reasoning_effort: None,
         })
+    }
+
+    pub fn with_reasoning_effort(mut self, reasoning_effort: Option<String>) -> Self {
+        self.reasoning_effort = reasoning_effort;
+        self
+    }
+
+    fn is_new_style_model(model: &str) -> bool {
+        let lower = model.to_ascii_lowercase();
+        const PREFIXES: [&str; 3] = ["gpt-5", "o1", "o3"];
+        PREFIXES.iter().any(|prefix| lower.starts_with(prefix))
+    }
+
+    fn max_tokens_param(model: &str) -> &'static str {
+        if Self::is_new_style_model(model) {
+            "max_completion_tokens"
+        } else {
+            "max_tokens"
+        }
+    }
+
+    fn supports_temperature(model: &str) -> bool {
+        !Self::is_new_style_model(model)
+    }
+
+    fn default_reasoning_effort(model: &str) -> Option<&'static str> {
+        if model.to_ascii_lowercase().starts_with("gpt-5") {
+            Some("minimal")
+        } else {
+            None
+        }
+    }
+
+    fn apply_model_defaults(&self, body: &mut Value, model: &str, max_tokens: u32) {
+        if let Some(obj) = body.as_object_mut() {
+            obj.remove("max_tokens");
+            obj.remove("max_completion_tokens");
+            obj.insert(Self::max_tokens_param(model).to_string(), json!(max_tokens));
+            if Self::supports_temperature(model) {
+                obj.insert("temperature".into(), json!(0.0));
+            } else {
+                obj.remove("temperature");
+            }
+            let reasoning = if Self::default_reasoning_effort(model).is_some() {
+                self.reasoning_effort
+                    .as_deref()
+                    .or_else(|| Self::default_reasoning_effort(model))
+            } else {
+                None
+            };
+            if let Some(effort) = reasoning {
+                obj.insert("reasoning_effort".into(), json!(effort));
+            } else {
+                obj.remove("reasoning_effort");
+            }
+        }
     }
 
     fn chat_url(&self) -> String {
@@ -108,14 +168,13 @@ impl ChatClient {
 
     /// Non-streaming chat completion: returns the full assistant message.
     pub async fn chat_once(&self, model: &str, prompt: &str, debug: bool) -> Result<String> {
-        let body = json!({
+        let mut body = json!({
             "model": model,
             "messages": [
                 {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.0,
-            "max_tokens": 4000
+            ]
         });
+        self.apply_model_defaults(&mut body, model, DEFAULT_MAX_COMPLETION_TOKENS);
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
             eprintln!("[debug] POST {} ({} bytes)", self.chat_url(), bytes.len());
@@ -150,12 +209,11 @@ impl ChatClient {
         messages: &[Msg<'_>],
         debug: bool,
     ) -> Result<String> {
-        let body = json!({
+        let mut body = json!({
             "model": model,
-            "messages": messages,
-            "temperature": 0.0,
-            "max_tokens": 4000
+            "messages": messages
         });
+        self.apply_model_defaults(&mut body, model, DEFAULT_MAX_COMPLETION_TOKENS);
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
             eprintln!("[debug] POST {} ({} bytes)", self.chat_url(), bytes.len());
@@ -191,13 +249,12 @@ impl ChatClient {
         tools: serde_json::Value,
         debug: bool,
     ) -> Result<AssistantReply> {
-        let body = json!({
+        let mut body = json!({
             "model": model,
             "messages": messages,
-            "tools": tools,
-            "temperature": 0.0,
-            "max_tokens": 4000
+            "tools": tools
         });
+        self.apply_model_defaults(&mut body, model, DEFAULT_MAX_COMPLETION_TOKENS);
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
             eprintln!("[debug] POST {} ({} bytes)", self.chat_url(), bytes.len());
@@ -248,15 +305,14 @@ impl ChatClient {
     where
         F: FnMut(&str),
     {
-        let body = json!({
+        let mut body = json!({
             "model": model,
             "messages": [
                 {"role": "user", "content": prompt}
             ],
-            "stream": true,
-            "temperature": 0.0,
-            "max_tokens": 4000
+            "stream": true
         });
+        self.apply_model_defaults(&mut body, model, DEFAULT_MAX_COMPLETION_TOKENS);
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
             eprintln!(
@@ -333,13 +389,12 @@ impl ChatClient {
     where
         F: FnMut(&str),
     {
-        let body = json!({
+        let mut body = json!({
             "model": model,
             "messages": messages,
-            "stream": true,
-            "temperature": 0.0,
-            "max_tokens": 4000
+            "stream": true
         });
+        self.apply_model_defaults(&mut body, model, DEFAULT_MAX_COMPLETION_TOKENS);
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
             eprintln!(
