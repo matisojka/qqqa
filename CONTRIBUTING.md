@@ -25,33 +25,33 @@ Prerequisites
 - Optional extra linkers if you aim for musl or uncommon targets.
 
 Quick start (tagging HEAD)
-1) Build and package v0.8.3:
+1) Build and package v0.8.4:
 ```
-scripts/release.sh v0.8.3
+scripts/release.sh v0.8.4
 ```
 2) Commit artifacts and version bump:
 ```
 git add Cargo.toml
-git commit -m "release: v0.8.3"
+git commit -m "release: v0.8.4"
 ```
 3) Tag and push:
 ```
-git tag -a v0.8.3 -m "qqqa v0.8.3"
+git tag -a v0.8.4 -m "qqqa v0.8.4"
 git push && git push --tags
 ```
 
 Tag a specific SHA
 ```
-scripts/release.sh v0.8.3 <git_sha>
+scripts/release.sh v0.8.4 <git_sha>
 git add Cargo.toml
-git commit -m "release: v0.8.3"
-git tag -a v0.8.3 <git_sha> -m "qqqa v0.8.3"
+git commit -m "release: v0.8.4"
+git tag -a v0.8.4 <git_sha> -m "qqqa v0.8.4"
 git push && git push --tags
 ```
 
 Limit targets
 ```
-TARGETS="x86_64-apple-darwin aarch64-apple-darwin" scripts/release.sh v0.8.3
+TARGETS="x86_64-apple-darwin aarch64-apple-darwin" scripts/release.sh v0.8.4
 ```
 
 What the script does
@@ -67,4 +67,3 @@ Notes
 ## Code of Conduct
 
 Be respectful, constructive, and considerate. We value practical collaboration and helpful reviews.
-

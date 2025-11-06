@@ -263,51 +263,6 @@ Project layout:
 
 See CONTRIBUTING.md for guidelines on reporting issues and opening pull requests, building from source, and the release process.
 
-## Releases
-
-Official builds are published through the GitHub Releases page.
-
-- Build and package a release locally:
-
-```sh
-# Build v0.8.3 for macOS (x86_64 + arm64) and Linux MUSL (x86_64 + arm64)
-scripts/release.sh v0.8.3
-
-# Optionally specify a Git SHA to record in the manifest (and tag later)
-scripts/release.sh v0.8.3 <git_sha>
-
-# Override targets (space-separated) if you need a custom set
-TARGETS="x86_64-apple-darwin aarch64-unknown-linux-musl" scripts/release.sh v0.8.3
-```
-
-What the script does:
-
-- Bumps `Cargo.toml` version to the given one.
-- Builds `qq` and `qa` for each target with `cargo build --release` (default targets cover macOS x86_64/arm64 and Linux MUSL x86_64/arm64).
-- Packages `qqqa-v<version>-<target>.tar.gz` under `target/releases/v<version>/` with checksums.
-- Writes `target/releases/v<version>/manifest.json` for upload.
-
-Tagging the release:
-
-```sh
-git add Cargo.toml
-git commit -m "release: v0.8.3"
-git tag -a v0.8.3 -m "qqqa v0.8.3"   # or: git tag -a v0.8.3 <sha> -m "qqqa v0.8.3"
-git push && git push --tags
-```
-
-Common targets (customizable via `TARGETS`):
-
-- `x86_64-apple-darwin`
-- `aarch64-apple-darwin`
-- `x86_64-unknown-linux-gnu`
-- `aarch64-unknown-linux-gnu`
-
-Notes:
-
-- Cross-compiling may require additional toolchains; `rustup target add <triple>` is attempted automatically.
-- For fully-static Linux builds, you can adjust targets to `*-unknown-linux-musl` if your environment supports it.
-
 ## Troubleshooting
 
 - API error about missing key: run `qq --init` to set things up, or export the relevant env var, e.g. `export GROQ_API_KEY=...`.
