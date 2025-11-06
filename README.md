@@ -13,6 +13,10 @@ The two binaries are:
 
 By default the repo includes profiles for OpenAI and Groq.
 
+<video src="docs/demo.mp4" controls width="640">
+  Sorry, your browser doesn't support embedded videos. You can download it from docs/demo.mp4.
+</video>
+
 ## Names and typing speed
 
 qq means quick question. qa means quick agent. Both are easy to type rapidly on QWERTY keyboards with minimal finger movement. That makes interacting with LLMs faster and more natural during real work.
