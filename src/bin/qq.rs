@@ -25,6 +25,10 @@ struct Cli {
     #[arg(short = 'p', long = "profile")]
     profile: Option<String>,
 
+    /// Override the resolved provider base URL (e.g., http://localhost:11434/v1)
+    #[arg(long = "api-base")]
+    api_base: Option<String>,
+
     /// Override the model ID from profile
     #[arg(short = 'm', long = "model")]
     model: Option<String>,
@@ -112,7 +116,7 @@ async fn main() -> Result<()> {
 
     // Load config and resolve profile/model.
     let (cfg, _path) = Config::load_or_init(cli.debug)?;
-    let eff = match cfg.resolve_profile(cli.profile.as_deref(), cli.model.as_deref()) {
+    let mut eff = match cfg.resolve_profile(cli.profile.as_deref(), cli.model.as_deref()) {
         Ok(eff) => eff,
         Err(e) => {
             let msg = e.to_string();
@@ -125,6 +129,9 @@ async fn main() -> Result<()> {
             return Err(anyhow!(out));
         }
     };
+    if let Some(base) = cli.api_base.as_deref() {
+        eff.base_url = base.to_string();
+    }
     if cli.debug {
         eprintln!(
             "[debug] Using provider='{}' base_url='{}' model='{}'",

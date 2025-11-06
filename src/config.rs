@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 /// Location of config dir relative to the home directory.
 const CONFIG_DIR_NAME: &str = ".qq";
 const CONFIG_FILE_NAME: &str = "config.json";
+const LOCAL_PROVIDER_PLACEHOLDER_API_KEY: &str = "qqqa-local-placeholder";
 
 #[derive(Debug)]
 pub struct InitExistsError {
@@ -29,6 +30,9 @@ pub struct ModelProvider {
     /// Optional inline api key in config. Env var takes precedence only if this is absent.
     #[serde(default)]
     pub api_key: Option<String>,
+    /// True when the provider targets a local runtime (no API key required).
+    #[serde(default)]
+    pub local: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,6 +70,7 @@ impl Default for Config {
                 base_url: "https://api.openai.com/v1".to_string(),
                 env_key: "OPENAI_API_KEY".to_string(),
                 api_key: None,
+                local: false,
             },
         );
         model_providers.insert(
@@ -75,6 +80,7 @@ impl Default for Config {
                 base_url: "https://api.groq.com/openai/v1".to_string(),
                 env_key: "GROQ_API_KEY".to_string(),
                 api_key: None,
+                local: false,
             },
         );
         model_providers.insert(
@@ -84,6 +90,17 @@ impl Default for Config {
                 base_url: "https://api.anthropic.com/v1".to_string(),
                 env_key: "ANTHROPIC_API_KEY".to_string(),
                 api_key: None,
+                local: false,
+            },
+        );
+        model_providers.insert(
+            "ollama".to_string(),
+            ModelProvider {
+                name: "Ollama".to_string(),
+                base_url: "http://127.0.0.1:11434/v1".to_string(),
+                env_key: "OLLAMA_API_KEY".to_string(),
+                api_key: None,
+                local: true,
             },
         );
 
@@ -112,6 +129,14 @@ impl Default for Config {
                 reasoning_effort: None,
             },
         );
+        profiles.insert(
+            "ollama".to_string(),
+            Profile {
+                model_provider: "ollama".to_string(),
+                model: "llama3.1".to_string(),
+                reasoning_effort: None,
+            },
+        );
 
         Self {
             default_profile: "groq".to_string(),
@@ -132,6 +157,7 @@ pub struct EffectiveProfile {
     pub base_url: String,
     pub api_key: String,
     pub reasoning_effort: Option<String>,
+    pub is_local: bool,
 }
 
 impl Config {
@@ -231,17 +257,20 @@ impl Config {
         let model = model_override.unwrap_or(&profile.model).to_string();
         let base_url = provider.base_url.clone();
 
-        // Prefer inline api_key; else env var per env_key.
+        // Prefer inline api_key; else env var per env_key. Local providers fall back to a
+        // placeholder key so callers can continue to send an Authorization header.
         let api_key = if let Some(k) = provider.api_key.clone() {
             k
+        } else if let Ok(value) = std::env::var(&provider.env_key) {
+            value
+        } else if provider.local {
+            LOCAL_PROVIDER_PLACEHOLDER_API_KEY.to_string()
         } else {
-            std::env::var(&provider.env_key).map_err(|_| {
-                anyhow!(
-                    "Missing API key: set '{}' env var or add 'api_key' to provider '{}' in config",
-                    provider.env_key,
-                    provider_key
-                )
-            })?
+            return Err(anyhow!(
+                "Missing API key: set '{}' env var or add 'api_key' to provider '{}' in config",
+                provider.env_key,
+                provider_key
+            ));
         };
 
         Ok(EffectiveProfile {
@@ -250,6 +279,7 @@ impl Config {
             base_url,
             api_key,
             reasoning_effort: profile.reasoning_effort.clone(),
+            is_local: provider.local,
         })
     }
 
@@ -280,7 +310,8 @@ impl Config {
         println!("  [1] Groq  — openai/gpt-oss-20b (fast, cheap)");
         println!("  [2] OpenAI — gpt-5-mini (slower, a bit smarter)");
         println!("  [3] Anthropic — claude-3-5-sonnet-20241022 (Claude by Anthropic)");
-        print!("Enter 1, 2, or 3 [1]: ");
+        println!("  [4] Ollama — llama3.1 via http://127.0.0.1:11434/v1 (runs locally)");
+        print!("Enter 1, 2, 3, or 4 [1]: ");
         io::stdout().flush().ok();
         let mut choice = String::new();
         io::stdin().read_line(&mut choice).ok();
@@ -288,6 +319,7 @@ impl Config {
         match choice {
             "2" | "openai" => cfg.default_profile = "openai".to_string(),
             "3" | "anthropic" => cfg.default_profile = "anthropic".to_string(),
+            "4" | "ollama" => cfg.default_profile = "ollama".to_string(),
             _ => cfg.default_profile = "groq".to_string(),
         }
 
@@ -300,10 +332,17 @@ impl Config {
             .clone();
 
         let env_hint = provider.env_key.clone();
-        println!(
-            "\nEnter {} (optional). Leave empty to use env var {}.",
-            provider.name, env_hint
-        );
+        if provider.local {
+            println!(
+                "\n{} runs locally at {}. No API key is required; press Enter to continue or paste one if your setup needs it.",
+                provider.name, provider.base_url
+            );
+        } else {
+            println!(
+                "\nEnter {} (optional). Leave empty to use env var {}.",
+                provider.name, env_hint
+            );
+        }
         print!("{}: ", provider.name);
         io::stdout().flush().ok();
         let mut key_in = String::new();
@@ -314,7 +353,7 @@ impl Config {
             if let Some(mp) = cfg.model_providers.get_mut(&provider_key) {
                 mp.api_key = Some(key_in);
             }
-        } else {
+        } else if !provider.local {
             // No inline key; check if env is present and warn if missing.
             if std::env::var(&env_hint).is_err() {
                 println!(
