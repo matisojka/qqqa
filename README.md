@@ -197,9 +197,9 @@ The runner enforces a default allowlist (think `ls`, `grep`, `find`, `rg`, `awk`
 
 ## Safety model
 
-- File tools require paths to be inside your home or the current directory. Reads are capped to 1 MiB.
-- Command execution blocks obviously dangerous patterns like `rm -rf /`, `sudo`, and direct disk writes. Commands run with a timeout.
-- The agent performs at most one tool step. There is no loop.
+- File tools require paths to be inside your home or the current directory. Reads are capped to 1 MiB, and traversal/symlink escapes are blocked.
+- Command execution uses a default allowlist (e.g. `ls`, `grep`, `rg`, `find`) plus your custom `command_allowlist` entries. Destructive patterns (`rm -rf /`, `sudo`, `mkfs`, etc.) are always blocked, and pipelines/redirection/newlines prompt for confirmation even with `--yes`.
+- Commands run with a 120 s timeout and the agent performs at most one tool step—there is no loop.
 - Config files are created with safe permissions. API keys come from environment variables unless you explicitly add a key to the config.
 
 ## Environment variables
