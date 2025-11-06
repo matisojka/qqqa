@@ -222,7 +222,7 @@ See CONTRIBUTING.md for guidelines on reporting issues and opening pull requests
 
 ## Releases
 
-The repo ships prebuilt binaries under `releases/`. We keep the latest ~3 versions with a simple, script-driven flow.
+The repo ships prebuilt binaries under [releases/](https://github.com/matisojka/qqqa/tags).
 
 - Build and package a release:
 
