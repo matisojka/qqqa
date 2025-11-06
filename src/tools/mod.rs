@@ -1,9 +1,9 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 
+pub mod execute_command;
 pub mod read_file;
 pub mod write_file;
-pub mod execute_command;
 
 #[derive(Debug, Deserialize)]
 pub struct ToolEnvelope {
@@ -38,4 +38,3 @@ pub fn parse_tool_call(json_text: &str) -> Result<ToolCall> {
         other => Err(anyhow!("Unknown tool: {}", other)),
     }
 }
-

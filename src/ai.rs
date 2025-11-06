@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use reqwest::Client;
@@ -76,7 +76,10 @@ struct ChatResponseWithTools {
 /// A simplified representation of the assistant's first choice.
 pub enum AssistantReply {
     Content(String),
-    ToolCall { name: String, arguments_json: String },
+    ToolCall {
+        name: String,
+        arguments_json: String,
+    },
 }
 
 pub struct ChatClient {
@@ -92,13 +95,16 @@ impl ChatClient {
             .timeout(Duration::from_secs(60))
             .connect_timeout(Duration::from_secs(10))
             .build()?;
-        Ok(Self { client, base_url, api_key })
+        Ok(Self {
+            client,
+            base_url,
+            api_key,
+        })
     }
 
     fn chat_url(&self) -> String {
         format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
     }
-
 
     /// Non-streaming chat completion: returns the full assistant message.
     pub async fn chat_once(&self, model: &str, prompt: &str, debug: bool) -> Result<String> {
@@ -138,7 +144,12 @@ impl ChatClient {
     }
 
     /// Non-streaming chat completion using explicit messages.
-    pub async fn chat_once_messages(&self, model: &str, messages: &[Msg<'_>], debug: bool) -> Result<String> {
+    pub async fn chat_once_messages(
+        &self,
+        model: &str,
+        messages: &[Msg<'_>],
+        debug: bool,
+    ) -> Result<String> {
         let body = json!({
             "model": model,
             "messages": messages,
@@ -216,7 +227,10 @@ impl ChatClient {
 
         if let Some(calls) = choice.message.tool_calls {
             if let Some(first) = calls.into_iter().next() {
-                return Ok(AssistantReply::ToolCall { name: first.function.name, arguments_json: first.function.arguments });
+                return Ok(AssistantReply::ToolCall {
+                    name: first.function.name,
+                    arguments_json: first.function.arguments,
+                });
             }
         }
         let content = choice.message.content.unwrap_or_default();
@@ -224,7 +238,13 @@ impl ChatClient {
     }
 
     /// Streaming chat completion. Calls `on_token` for each token/delta of content.
-    pub async fn chat_stream<F>(&self, model: &str, prompt: &str, debug: bool, mut on_token: F) -> Result<()>
+    pub async fn chat_stream<F>(
+        &self,
+        model: &str,
+        prompt: &str,
+        debug: bool,
+        mut on_token: F,
+    ) -> Result<()>
     where
         F: FnMut(&str),
     {
@@ -239,7 +259,11 @@ impl ChatClient {
         });
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
-            eprintln!("[debug] POST {} ({} bytes, stream)", self.chat_url(), bytes.len());
+            eprintln!(
+                "[debug] POST {} ({} bytes, stream)",
+                self.chat_url(),
+                bytes.len()
+            );
         }
         let resp = self
             .client
@@ -265,17 +289,27 @@ impl ChatClient {
             let chunk: Bytes = item?;
             buffer.extend_from_slice(&chunk);
             // Process complete lines
-            while let Some(pos) = find_double_newline(&buffer).or_else(|| find_single_newline(&buffer)) {
+            while let Some(pos) =
+                find_double_newline(&buffer).or_else(|| find_single_newline(&buffer))
+            {
                 let line = buffer.drain(..=pos).collect::<Vec<u8>>();
                 let s = String::from_utf8_lossy(&line);
                 for raw in s.split('\n') {
                     let data = raw.trim();
-                    if data.is_empty() { continue; }
+                    if data.is_empty() {
+                        continue;
+                    }
                     if let Some(rest) = data.strip_prefix("data: ") {
-                        if rest == "[DONE]" { return Ok(()); }
+                        if rest == "[DONE]" {
+                            return Ok(());
+                        }
                         if let Ok(parsed) = serde_json::from_str::<ChatStreamChunk>(rest) {
                             for c in parsed.choices.into_iter() {
-                                if let Some(delta) = c.delta { if let Some(token) = delta.content { on_token(&token); } }
+                                if let Some(delta) = c.delta {
+                                    if let Some(token) = delta.content {
+                                        on_token(&token);
+                                    }
+                                }
                             }
                         } else if debug {
                             eprintln!("[debug] Unparsed stream line: {}", rest);
@@ -289,7 +323,13 @@ impl ChatClient {
     }
 
     /// Streaming chat completion with explicit messages (supports system+user for qq).
-    pub async fn chat_stream_messages<F>(&self, model: &str, messages: &[Msg<'_>], debug: bool, mut on_token: F) -> Result<()>
+    pub async fn chat_stream_messages<F>(
+        &self,
+        model: &str,
+        messages: &[Msg<'_>],
+        debug: bool,
+        mut on_token: F,
+    ) -> Result<()>
     where
         F: FnMut(&str),
     {
@@ -302,7 +342,11 @@ impl ChatClient {
         });
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
-            eprintln!("[debug] POST {} ({} bytes, stream)", self.chat_url(), bytes.len());
+            eprintln!(
+                "[debug] POST {} ({} bytes, stream)",
+                self.chat_url(),
+                bytes.len()
+            );
         }
         let resp = self
             .client
@@ -326,17 +370,27 @@ impl ChatClient {
         while let Some(item) = stream.next().await {
             let chunk: Bytes = item?;
             buffer.extend_from_slice(&chunk);
-            while let Some(pos) = find_double_newline(&buffer).or_else(|| find_single_newline(&buffer)) {
+            while let Some(pos) =
+                find_double_newline(&buffer).or_else(|| find_single_newline(&buffer))
+            {
                 let line = buffer.drain(..=pos).collect::<Vec<u8>>();
                 let s = String::from_utf8_lossy(&line);
                 for raw in s.split('\n') {
                     let data = raw.trim();
-                    if data.is_empty() { continue; }
+                    if data.is_empty() {
+                        continue;
+                    }
                     if let Some(rest) = data.strip_prefix("data: ") {
-                        if rest == "[DONE]" { return Ok(()); }
+                        if rest == "[DONE]" {
+                            return Ok(());
+                        }
                         if let Ok(parsed) = serde_json::from_str::<ChatStreamChunk>(rest) {
                             for c in parsed.choices.into_iter() {
-                                if let Some(delta) = c.delta { if let Some(token) = delta.content { on_token(&token); } }
+                                if let Some(delta) = c.delta {
+                                    if let Some(token) = delta.content {
+                                        on_token(&token);
+                                    }
+                                }
                             }
                         } else if debug {
                             eprintln!("[debug] Unparsed stream line: {}", rest);
@@ -359,9 +413,7 @@ pub struct Msg<'a> {
 
 fn find_double_newline(buf: &[u8]) -> Option<usize> {
     // Find position to cut at a blank line (\n\n). Return index of the second newline.
-    buf.windows(2)
-        .position(|w| w == b"\n\n")
-        .map(|i| i + 1)
+    buf.windows(2).position(|w| w == b"\n\n").map(|i| i + 1)
 }
 
 fn find_single_newline(buf: &[u8]) -> Option<usize> {

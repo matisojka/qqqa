@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::{ArgAction, Parser};
 use qqqa::ai::{ChatClient, Msg};
 use qqqa::config::Config;
@@ -69,7 +69,10 @@ async fn main() -> Result<()> {
         cfg.no_emoji = Some("true".to_string());
         cfg.save(&path, cli.debug)?;
         if cli.debug {
-            eprintln!("[debug] Disabled emojis in system prompt (persisted at {}).", path.display());
+            eprintln!(
+                "[debug] Disabled emojis in system prompt (persisted at {}).",
+                path.display()
+            );
         }
     }
 
@@ -112,7 +115,11 @@ async fn main() -> Result<()> {
     }
 
     // Read terminal history unless disabled.
-    let history = if cli.no_history { Vec::new() } else { read_recent_history(20, cli.debug) };
+    let history = if cli.no_history {
+        Vec::new()
+    } else {
+        read_recent_history(20, cli.debug)
+    };
 
     // Build system + user messages for formatting/topic control.
     let mut system = build_qq_system_prompt();
@@ -136,8 +143,14 @@ async fn main() -> Result<()> {
             // One empty line before streamed raw output
             println!("");
             let msgs = [
-                Msg { role: "system", content: &system },
-                Msg { role: "user", content: &user },
+                Msg {
+                    role: "system",
+                    content: &system,
+                },
+                Msg {
+                    role: "user",
+                    content: &user,
+                },
             ];
             client
                 .chat_stream_messages(&eff.model, &msgs, cli.debug, |tok| {
@@ -148,8 +161,14 @@ async fn main() -> Result<()> {
         } else {
             use qqqa::formatting::render_xmlish_to_ansi;
             let msgs = [
-                Msg { role: "system", content: &system },
-                Msg { role: "user", content: &user },
+                Msg {
+                    role: "system",
+                    content: &system,
+                },
+                Msg {
+                    role: "user",
+                    content: &user,
+                },
             ];
             let mut buf = String::new();
             client
@@ -167,10 +186,18 @@ async fn main() -> Result<()> {
     } else {
         let loading = start_loading_animation();
         let msgs = [
-            Msg { role: "system", content: &system },
-            Msg { role: "user", content: &user },
+            Msg {
+                role: "system",
+                content: &system,
+            },
+            Msg {
+                role: "user",
+                content: &user,
+            },
         ];
-        let full = client.chat_once_messages(&eff.model, &msgs, cli.debug).await?;
+        let full = client
+            .chat_once_messages(&eff.model, &msgs, cli.debug)
+            .await?;
         // Ensure the animation is stopped and cleared before printing the answer
         drop(loading);
         // One empty line before the first line of the answer

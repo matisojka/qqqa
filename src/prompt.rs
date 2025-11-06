@@ -60,7 +60,9 @@ pub fn build_qq_system_prompt() -> String {
     s.push_str("- For off-topic questions, kindly refuse and then provide fun computer/Unix/Linux trivia with wit and humor that's somehow related to their question if possible. ALWAYS use this EXACT format with XML tags:\n");
     s.push_str("  <warn>I can only help with terminal and technical tasks, but here's some fun tech trivia...</warn><br/>\n");
     s.push_str("  <info>Your witty, reality-based computer/Unix/Linux fact goes here</info>\n\n");
-    s.push_str("CRITICAL: ALWAYS wrap trivia text in <info></info> tags for proper cyan formatting!\n\n");
+    s.push_str(
+        "CRITICAL: ALWAYS wrap trivia text in <info></info> tags for proper cyan formatting!\n\n",
+    );
     s.push_str("ANSWER THE USER'S QUESTION DIRECTLY. For \"convert mp4 to mp3\", provide ffmpeg commands. For \"list files\", provide ls commands. Give the actual commands they need to run.\n\n");
     s.push_str("FORMAT using XML tags:\n");
     s.push_str("<cmd>command to run</cmd> = terminal commands (green)\n");
@@ -158,6 +160,11 @@ pub fn build_qa_system_prompt() -> String {
 }
 
 /// Build the user message for `qa`: includes timestamp, OS, optional history and stdin context, plus the task.
-pub fn build_qa_user_message(os: Option<OsType>, history: &[String], stdin_block: Option<&str>, task: &str) -> String {
+pub fn build_qa_user_message(
+    os: Option<OsType>,
+    history: &[String],
+    stdin_block: Option<&str>,
+    task: &str,
+) -> String {
     build_qq_prompt(os, history, stdin_block, task)
 }

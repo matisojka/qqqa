@@ -1,7 +1,7 @@
-pub mod config;
-pub mod history;
-pub mod prompt;
 pub mod ai;
+pub mod config;
 pub mod formatting;
-pub mod tools;
+pub mod history;
 pub mod perms;
+pub mod prompt;
+pub mod tools;

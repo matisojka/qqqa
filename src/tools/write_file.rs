@@ -13,9 +13,14 @@ pub struct Args {
 pub fn run(args: Args) -> Result<String> {
     let path = PathBuf::from(&args.path);
     ensure_safe_path(&path)?;
-    if let Some(parent) = path.parent() { fs::create_dir_all(parent).ok(); }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).ok();
+    }
     fs::write(&path, args.content.as_bytes())
         .with_context(|| format!("Writing file: {}", path.display()))?;
-    Ok(format!("Wrote {} ({} bytes)", path.display(), args.content.len()))
+    Ok(format!(
+        "Wrote {} ({} bytes)",
+        path.display(),
+        args.content.len()
+    ))
 }
-

@@ -64,4 +64,3 @@ pub fn read_recent_history(limit: usize, debug: bool) -> Vec<String> {
     }
     Vec::new()
 }
-

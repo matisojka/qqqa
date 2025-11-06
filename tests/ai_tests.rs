@@ -1,5 +1,5 @@
 use httpmock::Method::POST;
-use httpmock::{MockServer};
+use httpmock::MockServer;
 use qqqa::ai::ChatClient;
 use std::net::TcpListener;
 

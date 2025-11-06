@@ -1,6 +1,9 @@
 use nu_ansi_term::{Color, Style};
 use std::io::Write as _;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::thread;
 use std::time::Duration;
 
@@ -8,25 +11,46 @@ use std::time::Duration;
 /// Supported tags: <bold>, <cmd>, <info>, <file>, <warn>, <code>, <br/>
 pub fn render_xmlish_to_ansi(input: &str) -> String {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum Tag { Bold, Cmd, Info, File, Warn, Code }
+    enum Tag {
+        Bold,
+        Cmd,
+        Info,
+        File,
+        Warn,
+        Code,
+    }
 
     fn style_for_stack(stack: &[Tag]) -> Style {
         let mut st = Style::new();
         for t in stack {
             match t {
-                Tag::Bold => { st = st.bold(); }
-                Tag::Cmd => { st = st.fg(Color::Green); }
-                Tag::Info => { st = st.fg(Color::Cyan); }
-                Tag::File => { st = st.fg(Color::Magenta); }
-                Tag::Warn => { st = st.fg(Color::Yellow); }
-                Tag::Code => { st = st.fg(Color::Cyan); }
+                Tag::Bold => {
+                    st = st.bold();
+                }
+                Tag::Cmd => {
+                    st = st.fg(Color::Green);
+                }
+                Tag::Info => {
+                    st = st.fg(Color::Cyan);
+                }
+                Tag::File => {
+                    st = st.fg(Color::Magenta);
+                }
+                Tag::Warn => {
+                    st = st.fg(Color::Yellow);
+                }
+                Tag::Code => {
+                    st = st.fg(Color::Cyan);
+                }
             }
         }
         st
     }
 
     fn unescape(s: &str) -> String {
-        s.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+        s.replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
     }
 
     let mut out = String::new();
@@ -54,7 +78,10 @@ pub fn render_xmlish_to_ansi(input: &str) -> String {
             // Handle self-closing br
             let raw_no_space = raw.replace(' ', "");
             let tag_id = raw_no_space.trim_end_matches('/').to_ascii_lowercase();
-            if tag_id == "br" { out.push('\n'); continue; }
+            if tag_id == "br" {
+                out.push('\n');
+                continue;
+            }
 
             // Closing tag
             if raw.starts_with('/') {
@@ -144,7 +171,9 @@ pub struct LoadingAnimation {
 impl LoadingAnimation {
     pub fn stop(mut self) {
         self.stop.store(true, Ordering::SeqCst);
-        if let Some(h) = self.handle.take() { let _ = h.join(); }
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
         // Clear the line
         eprint!("\r        \r");
         let _ = std::io::stderr().flush();
@@ -154,7 +183,9 @@ impl LoadingAnimation {
 impl Drop for LoadingAnimation {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
-        if let Some(h) = self.handle.take() { let _ = h.join(); }
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
         eprint!("\r        \r");
         let _ = std::io::stderr().flush();
     }
@@ -167,14 +198,21 @@ pub fn start_loading_animation() -> LoadingAnimation {
     let handle = thread::spawn(move || {
         let mut n: u8 = 1;
         while !stop_cl.load(Ordering::SeqCst) {
-            let dots = match n { 1 => ".", 2 => "..", _ => "..." };
+            let dots = match n {
+                1 => ".",
+                2 => "..",
+                _ => "...",
+            };
             eprint!("\r{}", dots);
             let _ = std::io::stderr().flush();
             n = if n >= 3 { 1 } else { n + 1 };
             thread::sleep(Duration::from_millis(300));
         }
     });
-    LoadingAnimation { stop, handle: Some(handle) }
+    LoadingAnimation {
+        stop,
+        handle: Some(handle),
+    }
 }
 
 /// Reduce runs of blank lines to a single blank line and normalize newlines.
@@ -189,7 +227,9 @@ pub fn compact_blank_lines(input: &str) -> String {
                 last_blank = true;
             }
         } else {
-            if !out.is_empty() && !out.ends_with('\n') { out.push('\n'); }
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
             out.push_str(line);
             out.push('\n');
             last_blank = false;
