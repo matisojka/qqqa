@@ -4,9 +4,8 @@ set -euo pipefail
 # Simple release builder for qqqa
 # - Bumps Cargo.toml version
 # - Builds binaries for common targets
-# - Packages tar.gz artifacts under releases/v<version>/
-# - Writes checksums and a minimal manifest.json
-# - Keeps last 3 versions under releases/
+# - Packages tar.gz artifacts under target/releases/v<version>/
+# - Writes checksums and a minimal manifest.json (also under target/releases)
 # - Optionally tags the repo at a given SHA
 #
 # Usage:
@@ -87,8 +86,9 @@ fi
 echo "==> Building targets: ${targets[*]}"
 
 # Per-version directory for artifacts and manifest
-manifest_dir="releases/v${ver}"
-mkdir -p "$manifest_dir"
+artifact_root="target/releases/v${ver}"
+mkdir -p "$artifact_root"
+manifest_dir="$artifact_root"
 
 for t in "${targets[@]}"; do
   echo "--> Target: $t"
@@ -173,7 +173,7 @@ for t in "${targets[@]}"; do
   cp -f LICENSE "$outdir/" 2>/dev/null || true
 
   # Package tar.gz per target
-  tarball="${manifest_dir}/qqqa-v${ver}-${t}.tar.gz"
+  tarball="${artifact_root}/qqqa-v${ver}-${t}.tar.gz"
   tar -C "$outdir" -czf "$tarball" . 2>/dev/null || {
     # Fallback: package what's available
     echo "    Packaging whatever binaries are present for $t"
@@ -192,7 +192,7 @@ elif command -v sha256sum >/dev/null 2>&1; then
   checksum_cmd="sha256sum"
 fi
 
-manifest_file="${manifest_dir}/manifest.json"
+manifest_file="${artifact_root}/manifest.json"
 date_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 echo "==> Writing manifest ${manifest_file}"
@@ -225,36 +225,9 @@ echo "==> Writing manifest ${manifest_file}"
   echo "}"
 } > "$manifest_file"
 
-# Update index.json: keep last 3 versions
-echo "==> Updating releases/index.json (keep last 3)"
-index_file="releases/index.json"
-versions=( $(ls -1 releases | grep '^v' | sort -Vr | head -n 3) )
-{
-  echo "["
-  first=1
-  for v in "${versions[@]}"; do
-    [[ -f "releases/${v}/manifest.json" ]] || continue
-    if [[ $first -eq 0 ]]; then echo ","; fi
-    first=0
-    cat "releases/${v}/manifest.json"
-  done
-  echo
-  echo "]"
-} > "$index_file"
-
-# Prune older release directories
-all=( $(ls -1 releases | grep '^v' | sort -V) ) || true
-to_keep_set=" ${versions[*]} "
-for v in "${all[@]}"; do
-  if [[ " $to_keep_set " != *" $v "* ]]; then
-    echo "Pruning releases/$v"
-    rm -rf "releases/$v"
-  fi
-done
-
-echo "==> Done. Artifacts in releases/ and index at releases/index.json"
-echo "    Remember to commit changes and tag the release:"
-echo "      git add Cargo.toml releases/ && git commit -m 'release: v${ver}'"
+echo "==> Done. Artifacts staged under ${artifact_root}/"
+echo "    Remember to commit the version bump and tag the release:"
+echo "      git add Cargo.toml && git commit -m 'release: v${ver}'"
 if [[ -n "$git_sha" ]]; then
   echo "      git tag -a v${ver} ${git_sha} -m 'qqqa v${ver}'"
 else
