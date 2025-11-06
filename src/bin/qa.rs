@@ -6,8 +6,8 @@ use qqqa::history::read_recent_history;
 use qqqa::perms;
 use qqqa::prompt::{build_qa_system_prompt, build_qa_user_message, coalesce_prompt_inputs};
 use qqqa::tools::{ToolCall, parse_tool_call};
-use std::io::{Read, Stdin};
-use std::path::Path;
+use std::io::{Read, Stdin, Write};
+use std::path::{Path, PathBuf};
 
 /// qa — single-step agent that may use one tool
 #[derive(Debug, Parser)]
@@ -274,9 +274,35 @@ async fn run_execute_command_with_allowlist(
     cfg: &mut Config,
     cfg_path: &Path,
 ) -> Result<String> {
+    let mut base_dir = std::env::current_dir().context("Failed to read current directory")?;
+    if let Ok(canon) = base_dir.canonicalize() {
+        base_dir = canon;
+    }
+
     let original_args = args;
     loop {
-        match qqqa::tools::execute_command::run(original_args.clone(), auto_yes, debug).await {
+        let mut stream_printer = |chunk: qqqa::tools::execute_command::StreamChunk| match chunk.kind
+        {
+            qqqa::tools::execute_command::StreamKind::Stdout => {
+                let mut handle = std::io::stdout();
+                let _ = handle.write_all(chunk.data);
+                let _ = handle.flush();
+            }
+            qqqa::tools::execute_command::StreamKind::Stderr => {
+                let mut handle = std::io::stderr();
+                let _ = handle.write_all(chunk.data);
+                let _ = handle.flush();
+            }
+        };
+        let exec_args = sanitize_execute_args(original_args.clone(), &base_dir, debug);
+        match qqqa::tools::execute_command::run(
+            exec_args,
+            auto_yes,
+            debug,
+            Some(&mut stream_printer),
+        )
+        .await
+        {
             Ok(summary) => return Ok(summary),
             Err(err) => {
                 if let Some(program) = err
@@ -325,6 +351,71 @@ fn prompt_add_command_to_allowlist(program: &str) -> Result<bool> {
         .context("Failed to read response")?;
     let choice = line.trim().to_ascii_lowercase();
     Ok(choice == "y" || choice == "yes")
+}
+
+fn sanitize_execute_args(
+    args: qqqa::tools::execute_command::Args,
+    base_dir: &Path,
+    debug: bool,
+) -> qqqa::tools::execute_command::Args {
+    let (sanitized_path, fell_back) = sanitize_cwd_path(args.cwd.as_deref(), base_dir);
+    let sanitized_str = sanitized_path.to_string_lossy().to_string();
+
+    if fell_back && debug {
+        if let Some(original) = args.cwd.as_deref() {
+            eprintln!(
+                "[debug] Ignoring requested working directory '{}' and using {} instead",
+                original, sanitized_str
+            );
+        } else {
+            eprintln!(
+                "[debug] Using current working directory {} for execute_command",
+                sanitized_str
+            );
+        }
+    }
+
+    qqqa::tools::execute_command::Args {
+        command: args.command,
+        cwd: Some(sanitized_str),
+    }
+}
+
+fn sanitize_cwd_path(requested: Option<&str>, base_dir: &Path) -> (PathBuf, bool) {
+    let base = base_dir.to_path_buf();
+    let Some(raw) = requested else {
+        return (base, false);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return (base, false);
+    }
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        if let Ok(canon) = std::fs::canonicalize(path) {
+            if canon.starts_with(base_dir) {
+                return (canon, false);
+            }
+        }
+        return (base, true);
+    }
+
+    let mut relative = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(seg) => relative.push(seg),
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => {
+                return (base, true);
+            }
+        }
+    }
+    if relative.as_os_str().is_empty() {
+        return (base, false);
+    }
+    (base_dir.join(relative), false)
 }
 
 async fn execute_tool_call(
@@ -406,6 +497,7 @@ fn read_all_stdin(mut stdin: Stdin) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use tempfile::tempdir;
 
     #[tokio::test]
@@ -474,5 +566,56 @@ mod tests {
         .await
         .expect("nested json wrapper should succeed");
         assert!(result, "nested json wrapper should dispatch an inner tool");
+    }
+
+    #[test]
+    fn sanitize_cwd_allows_relative_subdir() {
+        let dir = tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(base.join("sub/child")).unwrap();
+
+        let args = qqqa::tools::execute_command::Args {
+            command: "pwd".into(),
+            cwd: Some("sub/child".into()),
+        };
+
+        let sanitized = sanitize_execute_args(args, &base, false);
+        let cwd_path = Path::new(sanitized.cwd.as_ref().unwrap());
+        assert_eq!(cwd_path, base.join("sub/child"));
+    }
+
+    #[test]
+    fn sanitize_cwd_rejects_parent_dirs() {
+        let dir = tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+
+        let (result, fell_back) = sanitize_cwd_path(Some("../outside"), &base);
+        assert_eq!(result, base);
+        assert!(fell_back);
+    }
+
+    #[test]
+    fn sanitize_cwd_rejects_absolute_outside() {
+        let dir = tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_path = outside.path().canonicalize().unwrap();
+
+        let (result, fell_back) =
+            sanitize_cwd_path(Some(outside_path.to_string_lossy().as_ref()), &base);
+        assert_eq!(result, base);
+        assert!(fell_back);
+    }
+
+    #[test]
+    fn sanitize_cwd_accepts_absolute_inside_base() {
+        let dir = tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let nested = base.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+
+        let (result, fell_back) = sanitize_cwd_path(Some(nested.to_string_lossy().as_ref()), &base);
+        assert_eq!(result, nested);
+        assert!(!fell_back);
     }
 }

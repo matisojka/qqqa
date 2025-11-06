@@ -213,6 +213,8 @@ qa --history "trace which git commands I ran recently"
 qa --no-fun "format and lint the repo"
 ```
 
+When qa runs a command while stdout is a terminal, output now streams live; the structured `[tool:execute_command]` summary still prints afterward for easy copying.
+
 `execute_command` prints the proposed command and asks for confirmation. It warns if the working directory is outside your home. Use `-y` to auto approve in trusted workflows.
 
 The runner enforces a default allowlist (think `ls`, `grep`, `find`, `rg`, `awk`, etc.) and rejects pipelines, redirection, and other high-risk constructs. When a command is blocked, `qa` prompts you to add it to `command_allowlist` inside `~/.qq/config.json`; approving once persists the choice and updates future runs.

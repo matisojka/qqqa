@@ -21,6 +21,7 @@ futures-util = "0.3"
 bytes = "1.6"
 nu-ansi-term = "0.50"
 shell-words = "1.1"
+portable-pty = "0.8"
 
 [features]
 default = []

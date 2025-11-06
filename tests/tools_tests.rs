@@ -95,6 +95,7 @@ async fn execute_command_runs_and_captures_output() {
         },
         true,
         true,
+        None,
     )
     .await
     .expect("execute_command should succeed");
@@ -106,16 +107,6 @@ async fn execute_command_runs_and_captures_output() {
 #[tokio::test]
 #[serial]
 async fn execute_command_honors_pty_force_flag() {
-    let script_available = std::process::Command::new("which")
-        .arg("script")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    if !script_available {
-        eprintln!("[test] skipping PTY force coverage; 'script' not available");
-        return;
-    }
-
     let temp = tempfile::tempdir().unwrap();
     unsafe {
         std::env::set_var("HOME", temp.path());
@@ -130,6 +121,7 @@ async fn execute_command_honors_pty_force_flag() {
         },
         true,
         false,
+        None,
     )
     .await
     .expect("baseline execute_command should succeed");
@@ -145,6 +137,7 @@ async fn execute_command_honors_pty_force_flag() {
         },
         true,
         false,
+        None,
     )
     .await
     .expect("execute_command with forced PTY should succeed");
@@ -163,25 +156,34 @@ async fn execute_command_honors_pty_force_flag() {
 #[cfg(unix)]
 #[tokio::test]
 #[serial]
-async fn execute_command_falls_back_when_script_missing() {
+async fn execute_command_respects_disable_flag() {
     let temp = tempfile::tempdir().unwrap();
     unsafe {
         std::env::set_var("HOME", temp.path());
     }
     std::env::set_current_dir(temp.path()).unwrap();
 
-    let original_path = std::env::var("PATH").ok();
-    let fallback_dir = std::path::Path::new("/bin");
-    if !fallback_dir.exists() {
-        eprintln!("[test] skipping PTY fallback coverage; /bin not found");
-        return;
-    }
+    let probe = "env sh -lc '[ -t 1 ] && echo tty || echo notty'";
     unsafe {
-        std::env::set_var("PATH", "/bin");
         std::env::set_var("QQQA_FORCE_PTY", "1");
     }
+    let forced = qqqa::tools::execute_command::run(
+        qqqa::tools::execute_command::Args {
+            command: probe.into(),
+            cwd: None,
+        },
+        true,
+        false,
+        None,
+    )
+    .await
+    .expect("forced PTY should succeed");
 
-    let probe = "env sh -lc '[ -t 1 ] && echo tty || echo notty'";
+    unsafe {
+        std::env::remove_var("QQQA_FORCE_PTY");
+        std::env::set_var("QQQA_DISABLE_PTY", "1");
+    }
+
     let res = qqqa::tools::execute_command::run(
         qqqa::tools::execute_command::Args {
             command: probe.into(),
@@ -189,22 +191,53 @@ async fn execute_command_falls_back_when_script_missing() {
         },
         true,
         false,
+        None,
     )
     .await
     .expect("execute_command fallback should succeed");
 
     unsafe {
-        if let Some(val) = original_path {
-            std::env::set_var("PATH", val);
-        } else {
-            std::env::remove_var("PATH");
-        }
-        std::env::remove_var("QQQA_FORCE_PTY");
+        std::env::remove_var("QQQA_DISABLE_PTY");
     }
 
+    assert!(forced.contains("tty"));
     assert!(
         res.contains("notty"),
         "expected fallback execution to behave like non-PTY run, got: {}",
         res
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn execute_command_streams_stdout_chunks() {
+    let temp = tempfile::tempdir().unwrap();
+    unsafe {
+        std::env::set_var("HOME", temp.path());
+    }
+    std::env::set_current_dir(temp.path()).unwrap();
+
+    let mut seen = Vec::new();
+    let mut printer = |chunk: qqqa::tools::execute_command::StreamChunk| {
+        if matches!(chunk.kind, qqqa::tools::execute_command::StreamKind::Stdout) {
+            seen.push(String::from_utf8_lossy(chunk.data).to_string());
+        }
+    };
+
+    let summary = qqqa::tools::execute_command::run(
+        qqqa::tools::execute_command::Args {
+            command: "env sh -lc 'echo first; echo second'".into(),
+            cwd: None,
+        },
+        true,
+        false,
+        Some(&mut printer),
+    )
+    .await
+    .expect("execute_command should stream output");
+
+    assert!(summary.contains("first"));
+    assert!(summary.contains("second"));
+    assert!(seen.iter().any(|line| line.contains("first")));
+    assert!(seen.iter().any(|line| line.contains("second")));
 }
