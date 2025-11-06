@@ -161,6 +161,42 @@ for t in "${targets[@]}"; do
   rm -rf "$outdir"
 done
 
+# Pack source tarball for Homebrew / manual uploads
+src_stage=$(mktemp -d)
+src_dir="qqqa-${ver}"
+rsync -a --exclude='.git' --exclude='target' --exclude='homebrew-tap' --exclude='.DS_Store' ./ "${src_stage}/${src_dir}/"
+src_tarball="${artifact_root}/qqqa-v${ver}-src.tar.gz"
+tar -C "$src_stage" -czf "$src_tarball" "$src_dir"
+rm -rf "$src_stage"
+src_sha=$(shasum -a 256 "$src_tarball" | awk '{print $1}')
+
+tap_formula="homebrew-tap/Formula/qqqa.rb"
+if [[ -f "$tap_formula" ]]; then
+  python3 <<PY
+from pathlib import Path
+import re
+
+formula = Path("$tap_formula")
+ver = "$ver"
+sha = "$src_sha"
+url = f"https://github.com/iagooar/qqqa/releases/download/v{ver}/qqqa-v{ver}-src.tar.gz"
+
+text = formula.read_text()
+text = re.sub(r'url "[^"]+"', f'url "{url}"', text)
+text = re.sub(r'sha256 "[^"]+"', f'sha256 "{sha}"', text)
+if 'version "' in text:
+    text = re.sub(r'version "[^"]+"', f'version "{ver}"', text)
+else:
+    text = text.replace(f'sha256 "{sha}"', f'sha256 "{sha}"\n  version "{ver}"', 1)
+
+formula.write_text(text)
+PY
+  echo "==> Updated Homebrew formula at $tap_formula"
+  echo "    Remember to commit and push the tap repository (homebrew-tap)."
+else
+  echo "==> Skipping Homebrew formula update (homebrew-tap/Formula/qqqa.rb not found)."
+fi
+
 # Checksums and manifest
 checksum_cmd=""
 if command -v shasum >/dev/null 2>&1; then

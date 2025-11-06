@@ -22,3 +22,5 @@ Cargo.lock
 # IDE and editor directories
 .vscode/
 .idea/
+
+homebrew-tap/

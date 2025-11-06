@@ -55,14 +55,18 @@ You can still use OpenAI or any other OpenAI compatible provider by adding a pro
 
 ## Install
 
-Download a prebuilt archive from the [releases](https://github.com/matisojka/qqqa/tags) directory (or the GitHub Releases page) for your platform, then extract and place the binaries on your `PATH`.
+### macOS
 
-Common targets:
+Use the Homebrew tap:
 
-- macOS (Intel): `qqqa-vX.Y.Z-x86_64-apple-darwin.tar.gz`
-- macOS (Apple Silicon): `qqqa-vX.Y.Z-aarch64-apple-darwin.tar.gz`
-- Linux (x86_64): `qqqa-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz`
-- Linux (ARM64): `qqqa-vX.Y.Z-aarch64-unknown-linux-gnu.tar.gz`
+```sh
+brew tap iagooar/qqqa
+brew install qqqa
+```
+
+### Linux
+
+Download a prebuilt archive from the [GitHub Releases](https://github.com/iagooar/qqqa/releases) page, extract it, and place `qq`/`qa` somewhere on your `PATH` (e.g., `/usr/local/bin`).
 
 ## Configure
 
