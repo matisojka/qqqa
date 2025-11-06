@@ -136,6 +136,21 @@ async fn main() -> Result<()> {
         {
             "type": "function",
             "function": {
+                "name": "json",
+                "description": r#"Wrap another tool call as { "tool": string, "arguments": object }."#,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "tool": {"type": "string"},
+                        "arguments": {"type": "object"}
+                    },
+                    "required": ["tool", "arguments"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "write_file",
                 "description": "Create or overwrite a UTF-8 text file.",
                 "parameters": {
@@ -182,56 +197,15 @@ async fn main() -> Result<()> {
             name,
             arguments_json,
         } => {
-            let handled = match name.as_str() {
-                "read_file" => {
-                    let args: qqqa::tools::read_file::Args = serde_json::from_str(&arguments_json)
-                        .map_err(|e| anyhow!("Failed to parse read_file args: {}", e))?;
-                    match qqqa::tools::read_file::run(args) {
-                        Ok(content) => {
-                            print_tool_result("read_file", &content);
-                            true
-                        }
-                        Err(e) => {
-                            print_tool_error("read_file", &e.to_string());
-                            true
-                        }
-                    }
-                }
-                "write_file" => {
-                    let args: qqqa::tools::write_file::Args = serde_json::from_str(&arguments_json)
-                        .map_err(|e| anyhow!("Failed to parse write_file args: {}", e))?;
-                    match qqqa::tools::write_file::run(args) {
-                        Ok(summary) => {
-                            print_tool_result("write_file", &summary);
-                            true
-                        }
-                        Err(e) => {
-                            print_tool_error("write_file", &e.to_string());
-                            true
-                        }
-                    }
-                }
-                "execute_command" => {
-                    let args: qqqa::tools::execute_command::Args =
-                        serde_json::from_str(&arguments_json)
-                            .map_err(|e| anyhow!("Failed to parse execute_command args: {}", e))?;
-                    match run_execute_command_with_allowlist(
-                        args, cli.yes, cli.debug, &mut cfg, &path,
-                    )
-                    .await
-                    {
-                        Ok(summary) => {
-                            print_tool_result("execute_command", &summary);
-                            true
-                        }
-                        Err(e) => {
-                            print_tool_error("execute_command", &e.to_string());
-                            true
-                        }
-                    }
-                }
-                _ => false,
-            };
+            let handled = execute_tool_call(
+                name.as_str(),
+                &arguments_json,
+                cli.yes,
+                cli.debug,
+                &mut cfg,
+                &path,
+            )
+            .await?;
             if !handled {
                 println!("Unknown tool call: {}", name);
             }
@@ -327,6 +301,67 @@ fn prompt_add_command_to_allowlist(program: &str) -> Result<bool> {
     Ok(choice == "y" || choice == "yes")
 }
 
+async fn execute_tool_call(
+    name: &str,
+    arguments_json: &str,
+    auto_yes: bool,
+    debug: bool,
+    cfg: &mut Config,
+    cfg_path: &Path,
+) -> Result<bool> {
+    let mut current_name = name.to_string();
+    let mut current_args = arguments_json.to_string();
+
+    loop {
+        match current_name.as_str() {
+            "read_file" => {
+                let args: qqqa::tools::read_file::Args = serde_json::from_str(&current_args)
+                    .map_err(|e| anyhow!("Failed to parse read_file args: {}", e))?;
+                match qqqa::tools::read_file::run(args) {
+                    Ok(content) => print_tool_result("read_file", &content),
+                    Err(e) => print_tool_error("read_file", &e.to_string()),
+                }
+                return Ok(true);
+            }
+            "write_file" => {
+                let args: qqqa::tools::write_file::Args = serde_json::from_str(&current_args)
+                    .map_err(|e| anyhow!("Failed to parse write_file args: {}", e))?;
+                match qqqa::tools::write_file::run(args) {
+                    Ok(summary) => print_tool_result("write_file", &summary),
+                    Err(e) => print_tool_error("write_file", &e.to_string()),
+                }
+                return Ok(true);
+            }
+            "execute_command" => {
+                let args: qqqa::tools::execute_command::Args = serde_json::from_str(&current_args)
+                    .map_err(|e| anyhow!("Failed to parse execute_command args: {}", e))?;
+                match run_execute_command_with_allowlist(args, auto_yes, debug, cfg, cfg_path).await
+                {
+                    Ok(summary) => print_tool_result("execute_command", &summary),
+                    Err(e) => print_tool_error("execute_command", &e.to_string()),
+                }
+                return Ok(true);
+            }
+            "json" => {
+                let inner: serde_json::Value = serde_json::from_str(&current_args)
+                    .map_err(|e| anyhow!("Failed to parse json wrapper: {}", e))?;
+                let tool_name = inner
+                    .get("tool")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow!("Wrapped json tool missing 'tool' field"))?;
+                let arguments = inner
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                current_name = tool_name.to_string();
+                current_args = serde_json::to_string(&arguments)?;
+                continue;
+            }
+            _ => return Ok(false),
+        }
+    }
+}
+
 fn print_tool_result(tool: &str, result: &str) {
     println!("[tool:{}]", tool);
     println!("{}", result.trim_end());
@@ -340,4 +375,78 @@ fn read_all_stdin(mut stdin: Stdin) -> Result<String> {
     let mut buf = String::new();
     stdin.read_to_string(&mut buf)?;
     Ok(buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn execute_tool_call_handles_json_wrapper() {
+        let dir = tempdir().unwrap();
+        unsafe {
+            std::env::set_var("HOME", dir.path());
+        }
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let file_path = dir.path().join("hello.txt");
+        std::fs::write(&file_path, "hi there").unwrap();
+
+        let mut cfg = Config::default();
+        let cfg_path = dir.path().join("config.json");
+
+        let payload = serde_json::json!({
+            "tool": "read_file",
+            "arguments": { "path": "hello.txt" }
+        });
+
+        let result = execute_tool_call(
+            "json",
+            &payload.to_string(),
+            false,
+            false,
+            &mut cfg,
+            &cfg_path,
+        )
+        .await
+        .expect("json wrapper should succeed");
+        assert!(result, "json wrapper should dispatch an inner tool");
+    }
+
+    #[tokio::test]
+    async fn execute_tool_call_handles_nested_json_wrapper() {
+        let dir = tempdir().unwrap();
+        unsafe {
+            std::env::set_var("HOME", dir.path());
+        }
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let file_path = dir.path().join("data.txt");
+        std::fs::write(&file_path, "content").unwrap();
+
+        let mut cfg = Config::default();
+        let cfg_path = dir.path().join("config.json");
+
+        let inner = serde_json::json!({
+            "tool": "read_file",
+            "arguments": { "path": "data.txt" }
+        });
+        let payload = serde_json::json!({
+            "tool": "json",
+            "arguments": inner
+        });
+
+        let result = execute_tool_call(
+            "json",
+            &payload.to_string(),
+            false,
+            false,
+            &mut cfg,
+            &cfg_path,
+        )
+        .await
+        .expect("nested json wrapper should succeed");
+        assert!(result, "nested json wrapper should dispatch an inner tool");
+    }
 }
