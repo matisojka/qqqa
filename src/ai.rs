@@ -106,16 +106,43 @@ impl ChatClient {
         format!("{}/chat/completions", self.base_url.trim_end_matches('/'))
     }
 
+    /// Determine the correct max tokens parameter name based on the model.
+    /// Newer OpenAI models (gpt-5, o1, o3 series) use "max_completion_tokens",
+    /// while older models use "max_tokens".
+    fn max_tokens_param(model: &str) -> &'static str {
+        let model_lower = model.to_lowercase();
+        if model_lower.starts_with("gpt-5")
+            || model_lower.starts_with("o1")
+            || model_lower.starts_with("o3")
+        {
+            "max_completion_tokens"
+        } else {
+            "max_tokens"
+        }
+    }
+
+    /// Check if the model supports custom temperature values.
+    /// Newer OpenAI models (gpt-5, o1, o3 series) only support the default temperature (1.0).
+    fn supports_temperature(model: &str) -> bool {
+        let model_lower = model.to_lowercase();
+        !(model_lower.starts_with("gpt-5")
+            || model_lower.starts_with("o1")
+            || model_lower.starts_with("o3"))
+    }
+
     /// Non-streaming chat completion: returns the full assistant message.
     pub async fn chat_once(&self, model: &str, prompt: &str, debug: bool) -> Result<String> {
-        let body = json!({
+        let max_tokens_key = Self::max_tokens_param(model);
+        let mut body = json!({
             "model": model,
             "messages": [
                 {"role": "user", "content": prompt}
             ],
-            "temperature": 0.0,
-            "max_tokens": 4000
+            max_tokens_key: 4000
         });
+        if Self::supports_temperature(model) {
+            body["temperature"] = json!(0.0);
+        }
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
             eprintln!("[debug] POST {} ({} bytes)", self.chat_url(), bytes.len());
@@ -150,12 +177,15 @@ impl ChatClient {
         messages: &[Msg<'_>],
         debug: bool,
     ) -> Result<String> {
-        let body = json!({
+        let max_tokens_key = Self::max_tokens_param(model);
+        let mut body = json!({
             "model": model,
             "messages": messages,
-            "temperature": 0.0,
-            "max_tokens": 4000
+            max_tokens_key: 4000
         });
+        if Self::supports_temperature(model) {
+            body["temperature"] = json!(0.0);
+        }
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
             eprintln!("[debug] POST {} ({} bytes)", self.chat_url(), bytes.len());
@@ -191,13 +221,16 @@ impl ChatClient {
         tools: serde_json::Value,
         debug: bool,
     ) -> Result<AssistantReply> {
-        let body = json!({
+        let max_tokens_key = Self::max_tokens_param(model);
+        let mut body = json!({
             "model": model,
             "messages": messages,
             "tools": tools,
-            "temperature": 0.0,
-            "max_tokens": 4000
+            max_tokens_key: 4000
         });
+        if Self::supports_temperature(model) {
+            body["temperature"] = json!(0.0);
+        }
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
             eprintln!("[debug] POST {} ({} bytes)", self.chat_url(), bytes.len());
@@ -248,15 +281,18 @@ impl ChatClient {
     where
         F: FnMut(&str),
     {
-        let body = json!({
+        let max_tokens_key = Self::max_tokens_param(model);
+        let mut body = json!({
             "model": model,
             "messages": [
                 {"role": "user", "content": prompt}
             ],
             "stream": true,
-            "temperature": 0.0,
-            "max_tokens": 4000
+            max_tokens_key: 4000
         });
+        if Self::supports_temperature(model) {
+            body["temperature"] = json!(0.0);
+        }
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
             eprintln!(
@@ -333,13 +369,16 @@ impl ChatClient {
     where
         F: FnMut(&str),
     {
-        let body = json!({
+        let max_tokens_key = Self::max_tokens_param(model);
+        let mut body = json!({
             "model": model,
             "messages": messages,
             "stream": true,
-            "temperature": 0.0,
-            "max_tokens": 4000
+            max_tokens_key: 4000
         });
+        if Self::supports_temperature(model) {
+            body["temperature"] = json!(0.0);
+        }
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
             eprintln!(
