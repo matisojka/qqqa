@@ -25,7 +25,7 @@ qq means quick question. qa means quick agent. Both are easy to type rapidly on 
 
 ## Philosophy
 
-qqqa is deliberately stateless. There is no long running session and no hidden conversation memory stored by the tool. Every run is independent and reproducible.
+qqqa is deliberately stateless. There is no long running session and no hidden conversation memory stored by the tool. Every run is mostly independent and reproducible. For maintaining a lowkey continuity you can use `"include_history": true` in the `config.json` (or choose to use history during the `qq --init` process).
 
 Why stateless is great:
 
