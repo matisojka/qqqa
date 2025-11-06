@@ -14,12 +14,38 @@ fn history_reader_prefers_existing_files_and_limits() {
     // Create zsh history with a couple entries
     std::fs::write(
         dir.path().join(".zsh_history"),
-        ": 1696971992:0;ls -la\n: 1696971993:0;echo hello\n",
+        ": 1696971992:0;qq alpha\n\
+: 1696971993:0;qa beta\n\
+: 1696971994:0;ls -la\n\
+: 1696971995:0;qq gamma\n\
+: 1696971996:0;qa delta\n\
+: 1696971997:0;git status\n\
+: 1696971998:0;qq epsilon\n\
+: 1696971999:0;qa zeta\n\
+: 1696972000:0;qq eta\n\
+: 1696972001:0;qa theta\n\
+: 1696972002:0;qq iota\n\
+: 1696972003:0;qa kappa\n\
+: 1696972004:0;qq lambda\n",
     )
     .unwrap();
 
-    let got = read_recent_history(20, true);
-    assert_eq!(got, vec!["ls -la", "echo hello"]);
+    let got = read_recent_history(10, true);
+    assert_eq!(
+        got,
+        vec![
+            "qa beta",
+            "qq gamma",
+            "qa delta",
+            "qq epsilon",
+            "qa zeta",
+            "qq eta",
+            "qa theta",
+            "qq iota",
+            "qa kappa",
+            "qq lambda"
+        ]
+    );
 }
 
 #[test]

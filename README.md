@@ -94,6 +94,8 @@ Defaults written to `~/.qq/config.json`:
 
 - Optional flag: `no_emoji` (unset by default). Set via `qq --no-fun` or `qa --no-fun`.
 
+Terminal history is **off by default**. During `qq --init` / `qa --init` you can opt in to sending the last 10 `qq`/`qa` commands along with each request. You can still override per run with `--history` (force on) or `-n/--no-history` (force off). Only commands whose first token is `qq` or `qa` are ever shared.
+
 You can still override at runtime:
 
 ```sh
@@ -121,8 +123,8 @@ git status | qq "summarize what I should do next"
 # raw text (no ANSI formatting)
 qq -r "explain sed vs awk"
 
-# skip reading terminal history
-qq -n "find large files in the last day"
+# include terminal history for this run
+qq --history "find large files in the last day"
 
 # disable emojis in responses (persists)
 qq --no-fun "summarize this"
@@ -190,6 +192,9 @@ qa "list Rust files under src sorted by size"
 
 # auto approve tool execution for non interactive scripts
 qa -y "count lines across *.rs"
+
+# include recent qq/qa commands just for this run
+qa --history "trace which git commands I ran recently"
 
 # disable emojis in responses (persists)
 qa --no-fun "format and lint the repo"

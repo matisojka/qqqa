@@ -56,11 +56,27 @@ pub fn read_recent_history(limit: usize, debug: bool) -> Vec<String> {
             }
         }
 
-        if !lines.is_empty() {
-            let n = lines.len();
+        let filtered: Vec<String> = lines
+            .into_iter()
+            .filter(|line| is_supported_history_command(line))
+            .collect();
+
+        if !filtered.is_empty() {
+            let n = filtered.len();
             let start = n.saturating_sub(limit);
-            return lines[start..min(n, start + limit)].to_vec();
+            return filtered[start..min(n, start + limit)].to_vec();
+        } else {
+            continue;
         }
     }
     Vec::new()
+}
+
+fn is_supported_history_command(line: &str) -> bool {
+    let first = line
+        .trim_start()
+        .split_whitespace()
+        .next()
+        .unwrap_or_default();
+    matches!(first, "qq" | "qa")
 }

@@ -29,6 +29,8 @@ pub struct Config {
     pub default_profile: String,
     pub model_providers: HashMap<String, ModelProvider>,
     pub profiles: HashMap<String, Profile>,
+    #[serde(default)]
+    pub include_history: bool,
     /// Optional flag to control emoji usage in prompts.
     /// If present and not equal to "0" or "false" (case-insensitive), emojis are disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -97,6 +99,7 @@ impl Default for Config {
             default_profile: "groq".to_string(),
             model_providers,
             profiles,
+            include_history: false,
             no_emoji: None,
             command_allowlist: None,
         }
@@ -164,6 +167,16 @@ impl Config {
     /// Commands explicitly allowed by the user for qa's execute_command tool.
     pub fn command_allowlist(&self) -> Vec<String> {
         self.command_allowlist.clone().unwrap_or_default()
+    }
+
+    /// Whether terminal history should be included in prompts by default.
+    pub fn history_enabled(&self) -> bool {
+        self.include_history
+    }
+
+    /// Persist the history preference toggle.
+    pub fn set_history_enabled(&mut self, enabled: bool) {
+        self.include_history = enabled;
     }
 
     /// Add a command to the custom allowlist. Returns true if the command was newly inserted.
@@ -286,6 +299,20 @@ impl Config {
                 );
             }
         }
+
+        println!("\nShare recent `qq` / `qa` commands with the model?");
+        println!("  Pros: gives follow-up questions more context without copy/paste.");
+        println!(
+            "  Cons: sends the last 10 `qq`/`qa` commands from your shell history to the LLM."
+        );
+        println!("You can change this later per run with CLI flags.");
+        print!("Upload those commands by default? [y/N]: ");
+        io::stdout().flush().ok();
+        let mut history_choice = String::new();
+        io::stdin().read_line(&mut history_choice).ok();
+        let history_choice = history_choice.trim().to_ascii_lowercase();
+        let history_enabled = matches!(history_choice.as_str(), "y" | "yes");
+        cfg.set_history_enabled(history_enabled);
 
         let json = serde_json::to_vec_pretty(&cfg)?;
         fs::write(&path, json).with_context(|| format!("Writing config: {}", path.display()))?;

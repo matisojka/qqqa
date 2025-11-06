@@ -32,6 +32,9 @@ struct Cli {
     /// Disable terminal history context
     #[arg(short = 'n', long = "no-history", action = ArgAction::SetTrue)]
     no_history: bool,
+    /// Include terminal history context even if disabled in config
+    #[arg(long = "history", action = ArgAction::SetTrue, conflicts_with = "no_history")]
+    history: bool,
 
     /// Stream response tokens as they arrive
     #[arg(short = 's', long = "stream", action = ArgAction::SetTrue)]
@@ -115,10 +118,17 @@ async fn main() -> Result<()> {
     }
 
     // Read terminal history unless disabled.
-    let history = if cli.no_history {
-        Vec::new()
+    let include_history = if cli.no_history {
+        false
+    } else if cli.history {
+        true
     } else {
-        read_recent_history(20, cli.debug)
+        cfg.history_enabled()
+    };
+    let history = if include_history {
+        read_recent_history(10, cli.debug)
+    } else {
+        Vec::new()
     };
 
     // Build system + user messages for formatting/topic control.
