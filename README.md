@@ -13,7 +13,11 @@ The two binaries are:
 
 By default the repo includes profiles for OpenAI and Groq.
 
-![demo_video.mp4](https://github.com/matisojka/qqqa/raw/refs/heads/master/docs/demo.mp4)
+
+
+https://github.com/user-attachments/assets/91e888ad-0279-4d84-924b-ba96c0fe43a0
+
+
 
 ## Names and typing speed
 
