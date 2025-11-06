@@ -227,14 +227,14 @@ The repo ships prebuilt binaries under [releases/](https://github.com/matisojka/
 - Build and package a release:
 
 ```sh
-# Build v0.8.1 for common targets and package tar.gz artifacts
-scripts/release.sh v0.8.1
+# Build v0.8.2 for common targets and package tar.gz artifacts
+scripts/release.sh v0.8.2
 
 # Optionally specify a Git SHA to record in the manifest (and tag later)
-scripts/release.sh v0.8.1 <git_sha>
+scripts/release.sh v0.8.2 <git_sha>
 
 # Override targets (space-separated)
-TARGETS="x86_64-apple-darwin aarch64-apple-darwin" scripts/release.sh v0.8.1
+TARGETS="x86_64-apple-darwin aarch64-apple-darwin" scripts/release.sh v0.8.2
 ```
 
 What the script does:
@@ -249,8 +249,8 @@ Tagging the release:
 
 ```sh
 git add Cargo.toml releases/
-git commit -m "release: v0.8.1"
-git tag -a v0.8.1 -m "qqqa v0.8.1"   # or: git tag -a v0.8.1 <sha> -m "qqqa v0.8.1"
+git commit -m "release: v0.8.2"
+git tag -a v0.8.2 -m "qqqa v0.8.2"   # or: git tag -a v0.8.2 <sha> -m "qqqa v0.8.2"
 git push && git push --tags
 ```
 
