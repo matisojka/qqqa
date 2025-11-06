@@ -1,6 +1,8 @@
 use crate::perms::{CommandDisposition, ensure_safe_command};
 use anyhow::{Context, Result, anyhow};
+use atty::Stream;
 use serde::Deserialize;
+use std::io::{self, Write};
 use std::path::PathBuf;
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
@@ -41,13 +43,7 @@ pub async fn run(args: Args, auto_yes: bool, debug: bool) -> Result<String> {
                 resolved.display()
             );
             if !auto_yes {
-                eprint!("Proceed anyway? [y/N]: ");
-                use std::io::Write;
-                std::io::stdout().flush().ok();
-                let mut line = String::new();
-                std::io::stdin().read_line(&mut line).ok();
-                let l = line.trim().to_lowercase();
-                if !(l == "y" || l == "yes") {
+                if !prompt_yes_no("Proceed anyway? [y/N]: ")? {
                     return Err(anyhow!("Execution canceled by user (cwd outside home)"));
                 }
             } else if debug {
@@ -56,13 +52,7 @@ pub async fn run(args: Args, auto_yes: bool, debug: bool) -> Result<String> {
         }
     }
     if requires_manual_confirmation || !auto_yes {
-        eprint!("Execute? [y/N]: ");
-        use std::io::Write;
-        std::io::stdout().flush().ok();
-        let mut line = String::new();
-        std::io::stdin().read_line(&mut line).ok();
-        let l = line.trim().to_lowercase();
-        if !(l == "y" || l == "yes") {
+        if !prompt_yes_no("Execute? [y/N]: ")? {
             return Err(anyhow!("Execution canceled by user"));
         }
     }
@@ -115,4 +105,58 @@ pub async fn run(args: Args, auto_yes: bool, debug: bool) -> Result<String> {
         summary.push('\n');
     }
     Ok(summary)
+}
+
+fn prompt_yes_no(prompt: &str) -> Result<bool> {
+    eprint!("{}", prompt);
+    io::stderr().flush().ok();
+
+    if atty::is(Stream::Stdin) {
+        let mut line = String::new();
+        io::stdin().read_line(&mut line)?;
+        return Ok(is_yes(&line));
+    }
+
+    #[cfg(unix)]
+    {
+        use std::fs::OpenOptions;
+        use std::io::{BufRead, BufReader};
+
+        let file = OpenOptions::new()
+            .read(true)
+            .open("/dev/tty")
+            .context("Failed to open /dev/tty for confirmation; re-run with --yes")?;
+        let mut reader = BufReader::new(file);
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .context("Failed to read confirmation from /dev/tty")?;
+        return Ok(is_yes(&line));
+    }
+
+    #[cfg(windows)]
+    {
+        use std::fs::OpenOptions;
+        use std::io::{BufRead, BufReader};
+
+        let file = OpenOptions::new()
+            .read(true)
+            .open("CONIN$")
+            .context("Failed to open CONIN$ for confirmation; re-run with --yes")?;
+        let mut reader = BufReader::new(file);
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .context("Failed to read confirmation from CONIN$")?;
+        return Ok(is_yes(&line));
+    }
+
+    #[allow(unreachable_code)]
+    Err(anyhow!(
+        "Unable to read confirmation from TTY; pass --yes to skip prompts"
+    ))
+}
+
+fn is_yes(input: &str) -> bool {
+    matches!(input.trim().to_lowercase().as_str(), "y" | "yes")
 }

@@ -124,6 +124,12 @@ qq -s "how do I kill a process by name on macOS"
 # include piped context
 git status | qq "summarize what I should do next"
 
+# pipe extra context and keep CLI question
+printf '%s\n' "This is a sample context. My code is 4242" | qq "What is my code"
+
+# pipe the question itself
+printf '%s\n' "Show me the full contents of this directory" | qq
+
 # raw text (no ANSI formatting)
 qq -r "explain sed vs awk"
 
@@ -193,6 +199,9 @@ qa "create a README snippet at notes/intro.md with a short summary"
 
 # run a command with confirmation
 qa "list Rust files under src sorted by size"
+
+# pipe the task itself
+printf '%s\n' "Show me the full contents of this directory" | qa
 
 # auto approve tool execution for non interactive scripts
 qa -y "count lines across *.rs"

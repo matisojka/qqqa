@@ -1,6 +1,41 @@
 use chrono::Utc;
 use os_info::Type as OsType;
 
+/// Normalized inputs for building prompts.
+pub struct PromptInputs {
+    pub question: String,
+    pub stdin_block: Option<String>,
+}
+
+/// Merge CLI question/task text with optional piped stdin.
+///
+/// - If CLI arguments are present (non-empty after trimming), they win and any
+///   piped text is preserved as extra context.
+/// - Otherwise, a non-empty piped block becomes the question/task and is NOT
+///   echoed as separate context to avoid duplication.
+pub fn coalesce_prompt_inputs(args_question: String, stdin_block: Option<String>) -> PromptInputs {
+    if args_question.trim().is_empty() {
+        if let Some(block) = stdin_block {
+            let trimmed = block.trim();
+            if !trimmed.is_empty() {
+                return PromptInputs {
+                    question: trimmed.to_string(),
+                    stdin_block: None,
+                };
+            }
+            return PromptInputs {
+                question: args_question,
+                stdin_block: Some(block),
+            };
+        }
+    }
+
+    PromptInputs {
+        question: args_question,
+        stdin_block,
+    }
+}
+
 /// Build the final prompt for `qq` per spec.
 /// Sections:
 /// - Header with date/time + OS

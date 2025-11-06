@@ -4,7 +4,7 @@ use qqqa::ai::{ChatClient, Msg};
 use qqqa::config::{Config, InitExistsError};
 use qqqa::formatting::{print_assistant_text, print_stream_token, start_loading_animation};
 use qqqa::history::read_recent_history;
-use qqqa::prompt::{build_qq_system_prompt, build_qq_user_message};
+use qqqa::prompt::{build_qq_system_prompt, build_qq_user_message, coalesce_prompt_inputs};
 use std::io::{Read, Stdin};
 
 /// qq — ask an LLM assistant a question
@@ -99,13 +99,16 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Build question string from args.
-    let question = cli.question.join(" ");
-    if question.trim().is_empty() && stdin_block.as_deref().map_or(true, |s| s.trim().is_empty()) {
+    let prepared = coalesce_prompt_inputs(cli.question.join(" "), stdin_block);
+    if prepared.question.trim().is_empty() {
         return Err(anyhow!(
             "No input provided. Pass a question or pipe stdin (e.g., `ls -la | qq explain`)."
         ));
     }
+    let qqqa::prompt::PromptInputs {
+        question,
+        stdin_block,
+    } = prepared;
 
     // Load config and resolve profile/model.
     let (cfg, _path) = Config::load_or_init(cli.debug)?;

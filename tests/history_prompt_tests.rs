@@ -73,3 +73,26 @@ fn prompt_builders_include_sections() {
     );
     assert!(user.contains("Question: Do the thing"));
 }
+
+#[test]
+fn coalesce_prompt_inputs_uses_piped_text_when_args_empty() {
+    let prepared = qqqa::prompt::coalesce_prompt_inputs(
+        String::new(),
+        Some("Show me the full contents of this directory\n".to_string()),
+    );
+    let qqqa::prompt::PromptInputs {
+        question,
+        stdin_block,
+    } = prepared;
+    assert_eq!(question, "Show me the full contents of this directory");
+    assert!(stdin_block.is_none());
+
+    let prompt = qqqa::prompt::build_qq_prompt(
+        Some(os_info::get().os_type()),
+        &[],
+        stdin_block.as_deref(),
+        &question,
+    );
+    assert!(prompt.contains("Question: Show me the full contents of this directory"));
+    assert!(!prompt.contains("Input from pipe:"));
+}

@@ -4,7 +4,7 @@ use qqqa::ai::{AssistantReply, ChatClient, Msg};
 use qqqa::config::{Config, InitExistsError};
 use qqqa::history::read_recent_history;
 use qqqa::perms;
-use qqqa::prompt::{build_qa_system_prompt, build_qa_user_message};
+use qqqa::prompt::{build_qa_system_prompt, build_qa_user_message, coalesce_prompt_inputs};
 use qqqa::tools::{ToolCall, parse_tool_call};
 use std::io::{Read, Stdin};
 use std::path::Path;
@@ -80,10 +80,14 @@ async fn main() -> Result<()> {
         None
     };
 
-    let task = cli.task.join(" ");
-    if task.trim().is_empty() && stdin_block.as_deref().map_or(true, |s| s.trim().is_empty()) {
+    let prepared = coalesce_prompt_inputs(cli.task.join(" "), stdin_block);
+    if prepared.question.trim().is_empty() {
         return Err(anyhow!("No input provided. Pass a task or pipe stdin."));
     }
+    let qqqa::prompt::PromptInputs {
+        question: task,
+        stdin_block,
+    } = prepared;
 
     let (mut cfg, path) = Config::load_or_init(cli.debug)?;
     perms::set_custom_allowlist(cfg.command_allowlist());
