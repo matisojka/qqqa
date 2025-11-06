@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
 use clap::{ArgAction, Parser};
 use qqqa::ai::{ChatClient, Msg};
-use qqqa::config::Config;
+use qqqa::config::{Config, InitExistsError};
 use qqqa::formatting::{print_assistant_text, print_stream_token, start_loading_animation};
 use qqqa::history::read_recent_history;
 use qqqa::prompt::{build_qq_system_prompt, build_qq_user_message};
@@ -59,9 +59,21 @@ async fn main() -> Result<()> {
 
     // Run interactive init if requested.
     if cli.init {
-        let path = Config::init_interactive(cli.debug)?;
-        if cli.debug {
-            eprintln!("[debug] Initialized config at {}", path.display());
+        match Config::init_interactive(cli.debug) {
+            Ok(path) => {
+                if cli.debug {
+                    eprintln!("[debug] Initialized config at {}", path.display());
+                }
+            }
+            Err(e) => match e.downcast::<InitExistsError>() {
+                Ok(init_err) => {
+                    println!(
+                        "Keeping your existing config at {}.\nMove or remove that file if you want to rerun --init.",
+                        init_err.path.display()
+                    );
+                }
+                Err(e) => return Err(e),
+            },
         }
         return Ok(());
     }

@@ -8,6 +8,19 @@ use std::path::{Path, PathBuf};
 const CONFIG_DIR_NAME: &str = ".qq";
 const CONFIG_FILE_NAME: &str = "config.json";
 
+#[derive(Debug)]
+pub struct InitExistsError {
+    pub path: PathBuf,
+}
+
+impl std::fmt::Display for InitExistsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Config already exists at {}", self.path.display())
+    }
+}
+
+impl std::error::Error for InitExistsError {}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelProvider {
     pub name: String,
@@ -247,6 +260,10 @@ impl Config {
             fs::create_dir_all(&dir)
                 .with_context(|| format!("Creating config dir: {}", dir.display()))?;
             set_permissions_dir(&dir, debug).ok();
+        }
+
+        if path.exists() {
+            return Err(InitExistsError { path: path.clone() }.into());
         }
 
         let mut cfg = Config::default();
