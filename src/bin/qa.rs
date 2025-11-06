@@ -1,11 +1,13 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result, anyhow};
 use clap::{ArgAction, Parser};
 use qqqa::ai::{AssistantReply, ChatClient, Msg};
 use qqqa::config::Config;
 use qqqa::history::read_recent_history;
+use qqqa::perms;
 use qqqa::prompt::{build_qa_system_prompt, build_qa_user_message};
-use qqqa::tools::{parse_tool_call, ToolCall};
+use qqqa::tools::{ToolCall, parse_tool_call};
 use std::io::{Read, Stdin};
+use std::path::Path;
 
 /// qa — single-step agent that may use one tool
 #[derive(Debug, Parser)]
@@ -69,11 +71,15 @@ async fn main() -> Result<()> {
     }
 
     let (mut cfg, path) = Config::load_or_init(cli.debug)?;
+    perms::set_custom_allowlist(cfg.command_allowlist());
     if cli.no_fun {
         cfg.no_emoji = Some("true".to_string());
         cfg.save(&path, cli.debug)?;
         if cli.debug {
-            eprintln!("[debug] Disabled emojis in system prompt (persisted at {}).", path.display());
+            eprintln!(
+                "[debug] Disabled emojis in system prompt (persisted at {}).",
+                path.display()
+            );
         }
     }
     let eff = match cfg.resolve_profile(cli.profile.as_deref(), cli.model.as_deref()) {
@@ -83,22 +89,34 @@ async fn main() -> Result<()> {
             let mut out = msg.clone();
             if msg.contains("Missing API key") {
                 out.push_str(
-                    "\n\nFix it quickly:\n- Run `qa --init` and choose provider; optionally paste the API key.\n- Or export an env var, e.g.\n    export GROQ_API_KEY=...  # Groq\n    export OPENAI_API_KEY=... # OpenAI",
+                    "\n\nFix it quickly:\n- Run `qa --init` and choose provider; optionally paste the API key.\n- Or export an env var, e.g.\n    export GROQ_API_KEY=...       # Groq\n    export OPENAI_API_KEY=...     # OpenAI\n    export ANTHROPIC_API_KEY=...  # Anthropic (Claude)",
                 );
             }
             return Err(anyhow!(out));
         }
     };
     if cli.debug {
-        eprintln!("[debug] Using provider='{}' base_url='{}' model='{}'", eff.provider_key, eff.base_url, eff.model);
+        eprintln!(
+            "[debug] Using provider='{}' base_url='{}' model='{}'",
+            eff.provider_key, eff.base_url, eff.model
+        );
     }
 
-    let history = if cli.no_history { Vec::new() } else { read_recent_history(20, cli.debug) };
+    let history = if cli.no_history {
+        Vec::new()
+    } else {
+        read_recent_history(20, cli.debug)
+    };
     let mut system_prompt = build_qa_system_prompt();
     if cfg.no_emoji_enabled() {
         system_prompt.push_str("\nHard rule: You MUST NOT use emojis anywhere in the response.\n");
     }
-    let user_msg = build_qa_user_message(Some(os_info::get().os_type()), &history, stdin_block.as_deref(), &task);
+    let user_msg = build_qa_user_message(
+        Some(os_info::get().os_type()),
+        &history,
+        stdin_block.as_deref(),
+        &task,
+    );
 
     let client = ChatClient::new(eff.base_url, eff.api_key)?;
     // Provide tool specs so the API can emit structured tool_calls instead of erroring.
@@ -144,14 +162,26 @@ async fn main() -> Result<()> {
     let assistant_reply = client
         .chat_once_messages_with_tools(
             &eff.model,
-            &[Msg { role: "system", content: &system_prompt }, Msg { role: "user", content: &user_msg }],
+            &[
+                Msg {
+                    role: "system",
+                    content: &system_prompt,
+                },
+                Msg {
+                    role: "user",
+                    content: &user_msg,
+                },
+            ],
             tools_spec,
             cli.debug,
         )
         .await?;
 
     match assistant_reply {
-        AssistantReply::ToolCall { name, arguments_json } => {
+        AssistantReply::ToolCall {
+            name,
+            arguments_json,
+        } => {
             let handled = match name.as_str() {
                 "read_file" => {
                     let args: qqqa::tools::read_file::Args = serde_json::from_str(&arguments_json)
@@ -182,9 +212,14 @@ async fn main() -> Result<()> {
                     }
                 }
                 "execute_command" => {
-                    let args: qqqa::tools::execute_command::Args = serde_json::from_str(&arguments_json)
-                        .map_err(|e| anyhow!("Failed to parse execute_command args: {}", e))?;
-                    match qqqa::tools::execute_command::run(args, cli.yes, cli.debug).await {
+                    let args: qqqa::tools::execute_command::Args =
+                        serde_json::from_str(&arguments_json)
+                            .map_err(|e| anyhow!("Failed to parse execute_command args: {}", e))?;
+                    match run_execute_command_with_allowlist(
+                        args, cli.yes, cli.debug, &mut cfg, &path,
+                    )
+                    .await
+                    {
                         Ok(summary) => {
                             print_tool_result("execute_command", &summary);
                             true
@@ -204,28 +239,24 @@ async fn main() -> Result<()> {
         AssistantReply::Content(assistant) => {
             // Try to parse as a tool call per our plain-JSON protocol; else print the answer.
             match parse_tool_call(assistant.trim()) {
-                Ok(call) => {
-                    match call {
-                        ToolCall::ReadFile(args) => {
-                            match qqqa::tools::read_file::run(args) {
-                                Ok(content) => print_tool_result("read_file", &content),
-                                Err(e) => print_tool_error("read_file", &e.to_string()),
-                            }
-                        }
-                        ToolCall::WriteFile(args) => {
-                            match qqqa::tools::write_file::run(args) {
-                                Ok(summary) => print_tool_result("write_file", &summary),
-                                Err(e) => print_tool_error("write_file", &e.to_string()),
-                            }
-                        }
-                        ToolCall::ExecuteCommand(args) => {
-                            match qqqa::tools::execute_command::run(args, cli.yes, cli.debug).await {
-                                Ok(summary) => print_tool_result("execute_command", &summary),
-                                Err(e) => print_tool_error("execute_command", &e.to_string()),
-                            }
-                        }
-                    }
-                }
+                Ok(call) => match call {
+                    ToolCall::ReadFile(args) => match qqqa::tools::read_file::run(args) {
+                        Ok(content) => print_tool_result("read_file", &content),
+                        Err(e) => print_tool_error("read_file", &e.to_string()),
+                    },
+                    ToolCall::WriteFile(args) => match qqqa::tools::write_file::run(args) {
+                        Ok(summary) => print_tool_result("write_file", &summary),
+                        Err(e) => print_tool_error("write_file", &e.to_string()),
+                    },
+                    ToolCall::ExecuteCommand(args) => match run_execute_command_with_allowlist(
+                        args, cli.yes, cli.debug, &mut cfg, &path,
+                    )
+                    .await
+                    {
+                        Ok(summary) => print_tool_result("execute_command", &summary),
+                        Err(e) => print_tool_error("execute_command", &e.to_string()),
+                    },
+                },
                 Err(_) => {
                     println!("{}", assistant.trim_end());
                 }
@@ -234,6 +265,66 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn run_execute_command_with_allowlist(
+    args: qqqa::tools::execute_command::Args,
+    auto_yes: bool,
+    debug: bool,
+    cfg: &mut Config,
+    cfg_path: &Path,
+) -> Result<String> {
+    let original_args = args;
+    loop {
+        match qqqa::tools::execute_command::run(original_args.clone(), auto_yes, debug).await {
+            Ok(summary) => return Ok(summary),
+            Err(err) => {
+                if let Some(program) = err
+                    .downcast_ref::<perms::CommandNotAllowedError>()
+                    .map(|e| e.program.clone())
+                {
+                    if !atty::is(atty::Stream::Stdin) {
+                        return Err(err);
+                    }
+                    if prompt_add_command_to_allowlist(&program)? {
+                        let inserted = cfg.add_command_to_allowlist(&program);
+                        if inserted {
+                            cfg.save(cfg_path, debug)?;
+                        }
+                        perms::set_custom_allowlist(cfg.command_allowlist());
+                        if inserted {
+                            if debug {
+                                eprintln!("[debug] Added '{}' to qa command allowlist", program);
+                            } else {
+                                eprintln!("Added '{}' to qa command allowlist.", program);
+                            }
+                        }
+                        continue;
+                    } else {
+                        return Err(err);
+                    }
+                } else {
+                    return Err(err);
+                }
+            }
+        }
+    }
+}
+
+fn prompt_add_command_to_allowlist(program: &str) -> Result<bool> {
+    use std::io::{self, Write};
+
+    eprint!(
+        "Command '{}' is not in the qa allowlist. Add it now and retry? [y/N]: ",
+        program
+    );
+    io::stderr().flush().context("Failed to flush prompt")?;
+    let mut line = String::new();
+    io::stdin()
+        .read_line(&mut line)
+        .context("Failed to read response")?;
+    let choice = line.trim().to_ascii_lowercase();
+    Ok(choice == "y" || choice == "yes")
 }
 
 fn print_tool_result(tool: &str, result: &str) {

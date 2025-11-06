@@ -4,12 +4,12 @@ Fast, stateless LLM-powered assistant for your shell: qq answers; qa runs comman
 
 ## What is qqqa
 
-qqqa is a two-in-one small CLI tool written in Rust that brings LLM assistance to the command line without ceremony.
+qqqa is a two-in-one, stateless CLI tool that brings LLM assistance to the command line without ceremony.
 
 The two binaries are:
 
-- `qq` - ask a single question, e.g. "qq how can I recursively list all files in this directory"
-- `qa` - a single step agent that can optionally use tools to finish a task: read a file, write a file, or execute a command with confirmation.
+- `qq` - ask a single question, e.g. "qq how can I recursively list all files in this directory" (qq stands for "quick question")
+- `qa` - a single step agent that can optionally use tools to finish a task: read a file, write a file, or execute a command with confirmation (qa stands for "quick agent")
 
 By default the repo includes profiles for OpenAI and Groq.
 
@@ -57,30 +57,6 @@ Common targets:
 - macOS (Apple Silicon): `qqqa-vX.Y.Z-aarch64-apple-darwin.tar.gz`
 - Linux (x86_64): `qqqa-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz`
 - Linux (ARM64): `qqqa-vX.Y.Z-aarch64-unknown-linux-gnu.tar.gz`
-
-Example (macOS Apple Silicon):
-
-```sh
-cd /path/to/downloads
-tar -xzf qqqa-v0.7.0-aarch64-apple-darwin.tar.gz
-mkdir -p "$HOME/bin"
-mv qq qa "$HOME/bin/"
-echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.zshrc"
-exec $SHELL -l
-qq --version && qa --version
-```
-
-Example (Linux):
-
-```sh
-cd /path/to/downloads
-tar -xzf qqqa-v0.7.0-x86_64-unknown-linux-gnu.tar.gz
-mkdir -p "$HOME/.local/bin"
-mv qq qa "$HOME/.local/bin/"
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
-exec $SHELL -l
-qq --version && qa --version
-```
 
 ## Configure
 
@@ -148,16 +124,14 @@ qq -n "find large files in the last day"
 qq --no-fun "summarize this"
 ```
 
-qq builds a user message that includes a timestamp, your OS, optional recent terminal history, optional piped stdin, and your question. The assistant is instructed to stay on technical topics and to format output using these tags:
+Note: it is possible to run qq without quotes, which works most of the time the same way as with quotes.
 
-- `<cmd>` for commands
-- `<bold>` for headings
-- `<info>` for tips
-- `<file>` for paths
-- `<warn>` for warnings
-- `<br/>` for blank lines
 
-The CLI renders these tags as ANSI colored output for readability.
+```sh
+# simplest
+qq convert mp4 to mp3
+```
+
 
 #### Example: forgot the ffmpeg incantation
 
@@ -218,6 +192,8 @@ qa --no-fun "format and lint the repo"
 ```
 
 `execute_command` prints the proposed command and asks for confirmation. It warns if the working directory is outside your home. Use `-y` to auto approve in trusted workflows.
+
+The runner enforces a default allowlist (think `ls`, `grep`, `find`, `rg`, `awk`, etc.) and rejects pipelines, redirection, and other high-risk constructs. When a command is blocked, `qa` prompts you to add it to `command_allowlist` inside `~/.qq/config.json`; approving once persists the choice and updates future runs.
 
 ## Safety model
 

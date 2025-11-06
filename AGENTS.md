@@ -5,7 +5,7 @@
 - Core modules: `ai.rs`, `config.rs`, `prompt.rs`, `history.rs`, `perms.rs`, `formatting.rs`.
 - Tools for the agent live in `src/tools/` (`read_file.rs`, `write_file.rs`, `execute_command.rs`).
 - Integration tests live in `tests/`. Build artifacts are in `target/`.
-- See `PORTING_TO_RUST.md` for architecture and behavior details.
+- Architecture notes: `src/lib.rs` re-exports the runtime modules and `src/tools/mod.rs` centralizes tool parsing/dispatch; refer to `README.md` for the high-level architecture and behavior overview.
 
 ## Build, Test, and Development Commands
 - Build: `cargo build` (debug) or `cargo build --release`.
@@ -33,5 +33,6 @@
 
 ## Security & Configuration Tips
 - Config path: `~/.qq/config.json`; enforce permissions (dir `700`, file `600`).
-- API keys via env: `OPENAI_API_KEY`, `GROQ_API_KEY`; never commit secrets.
+- API keys via env: `OPENAI_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`; never commit secrets.
 - Agent (`qa`): print proposed commands, require confirmation unless `--yes`; avoid destructive patterns and paths outside the workspace/home.
+- Command allowlist: default safe commands are bundled. Approving a blocked binary persists it under `command_allowlist` in `~/.qq/config.json` for future runs.

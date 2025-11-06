@@ -1,7 +1,7 @@
-use qqqa::perms::ensure_safe_path;
+use qqqa::perms::{clear_custom_allowlist, ensure_safe_path};
+use qqqa::tools::parse_tool_call;
 use qqqa::tools::read_file;
 use qqqa::tools::write_file;
-use qqqa::tools::parse_tool_call;
 use serial_test::serial;
 use std::path::PathBuf;
 
@@ -10,16 +10,29 @@ use std::path::PathBuf;
 fn read_and_write_file_tools_and_path_safety() {
     // Set HOME and CWD to a temp folder for deterministic safety checks.
     let temp = tempfile::tempdir().unwrap();
-    unsafe { std::env::set_var("HOME", temp.path()); }
+    clear_custom_allowlist();
+    unsafe {
+        std::env::set_var("HOME", temp.path());
+    }
     std::env::set_current_dir(temp.path()).unwrap();
 
     // write_file tool
-    let out = write_file::run(write_file::Args { path: "dir/file.txt".into(), content: "hello".into() }).unwrap();
+    let out = write_file::run(write_file::Args {
+        path: "dir/file.txt".into(),
+        content: "hello".into(),
+    })
+    .unwrap();
     assert!(out.contains("Wrote"));
-    assert_eq!(std::fs::read_to_string(temp.path().join("dir/file.txt")).unwrap(), "hello");
+    assert_eq!(
+        std::fs::read_to_string(temp.path().join("dir/file.txt")).unwrap(),
+        "hello"
+    );
 
     // read_file tool
-    let content = read_file::run(read_file::Args { path: "dir/file.txt".into() }).unwrap();
+    let content = read_file::run(read_file::Args {
+        path: "dir/file.txt".into(),
+    })
+    .unwrap();
     assert_eq!(content, "hello");
 
     // unsafe path outside HOME/CWD (unix only; skip on others)
@@ -27,6 +40,28 @@ fn read_and_write_file_tools_and_path_safety() {
     {
         let res = ensure_safe_path(&PathBuf::from("/tmp/should_be_blocked"));
         assert!(res.is_err(), "path outside HOME/CWD should be blocked");
+    }
+
+    // traversal escape should be denied
+    let traversal = write_file::run(write_file::Args {
+        path: "../../outside.txt".into(),
+        content: "nope".into(),
+    });
+    assert!(
+        traversal.is_err(),
+        "expected traversal attempt to be blocked"
+    );
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        let link_path = temp.path().join("link_to_etc");
+        let _ = symlink("/etc", &link_path);
+        let res = write_file::run(write_file::Args {
+            path: "link_to_etc/qqqa-test.conf".into(),
+            content: "nope".into(),
+        });
+        assert!(res.is_err(), "expected symlink escape to be blocked");
     }
 }
 
@@ -48,11 +83,16 @@ fn parse_tool_call_valid_and_invalid() {
 #[serial]
 async fn execute_command_runs_and_captures_output() {
     let temp = tempfile::tempdir().unwrap();
-    unsafe { std::env::set_var("HOME", temp.path()); }
+    unsafe {
+        std::env::set_var("HOME", temp.path());
+    }
     std::env::set_current_dir(temp.path()).unwrap();
 
     let res = qqqa::tools::execute_command::run(
-        qqqa::tools::execute_command::Args { command: "echo test123".into(), cwd: None },
+        qqqa::tools::execute_command::Args {
+            command: "echo test123".into(),
+            cwd: None,
+        },
         true,
         true,
     )

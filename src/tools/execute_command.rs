@@ -1,11 +1,11 @@
-use crate::perms::ensure_safe_command;
-use anyhow::{anyhow, Context, Result};
+use crate::perms::{CommandDisposition, ensure_safe_command};
+use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 use std::path::PathBuf;
 use tokio::process::Command;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Args {
     pub command: String,
     #[serde(default)]
@@ -13,11 +13,22 @@ pub struct Args {
 }
 
 pub async fn run(args: Args, auto_yes: bool, debug: bool) -> Result<String> {
-    ensure_safe_command(&args.command)?;
-
     let cwd = args.cwd.as_deref().unwrap_or(".");
     eprintln!("Proposed command: {}", &args.command);
     eprintln!("Working directory: {}", cwd);
+
+    let disposition = match ensure_safe_command(&args.command) {
+        Ok(d) => d,
+        Err(err) => {
+            eprintln!("[blocked] {}", err);
+            return Err(err);
+        }
+    };
+    let mut requires_manual_confirmation = false;
+    if let CommandDisposition::NeedsConfirmation { reason } = &disposition {
+        requires_manual_confirmation = true;
+        eprintln!("[warn] {}", reason);
+    }
     // Additional confirmation if cwd is outside the user's home directory
     if let Some(home) = dirs::home_dir() {
         use std::path::Path;
@@ -44,7 +55,7 @@ pub async fn run(args: Args, auto_yes: bool, debug: bool) -> Result<String> {
             }
         }
     }
-    if !auto_yes {
+    if requires_manual_confirmation || !auto_yes {
         eprint!("Execute? [y/N]: ");
         use std::io::Write;
         std::io::stdout().flush().ok();
@@ -58,7 +69,9 @@ pub async fn run(args: Args, auto_yes: bool, debug: bool) -> Result<String> {
 
     // Build shell execution: run via sh -lc to allow pipes and quotes.
     let mut cmd = Command::new("sh");
-    cmd.arg("-lc").arg(&args.command).current_dir(PathBuf::from(cwd));
+    cmd.arg("-lc")
+        .arg(&args.command)
+        .current_dir(PathBuf::from(cwd));
     cmd.kill_on_drop(true);
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped());
@@ -80,7 +93,12 @@ pub async fn run(args: Args, auto_yes: bool, debug: bool) -> Result<String> {
     let stderr = String::from_utf8_lossy(&out.stderr).to_string();
     let code = out.status.code().unwrap_or(-1);
     if debug {
-        eprintln!("[debug] exit code: {} (stdout {} bytes, stderr {} bytes)", code, stdout.len(), stderr.len());
+        eprintln!(
+            "[debug] exit code: {} (stdout {} bytes, stderr {} bytes)",
+            code,
+            stdout.len(),
+            stderr.len()
+        );
     }
 
     // Return a structured plain-text summary including stdout/stderr.
@@ -88,9 +106,13 @@ pub async fn run(args: Args, auto_yes: bool, debug: bool) -> Result<String> {
     summary.push_str(&format!("Exit code: {}\n", code));
     summary.push_str("--- stdout ---\n");
     summary.push_str(&stdout);
-    if !stdout.ends_with('\n') { summary.push('\n'); }
+    if !stdout.ends_with('\n') {
+        summary.push('\n');
+    }
     summary.push_str("--- stderr ---\n");
     summary.push_str(&stderr);
-    if !stderr.ends_with('\n') { summary.push('\n'); }
+    if !stderr.ends_with('\n') {
+        summary.push('\n');
+    }
     Ok(summary)
 }

@@ -7,7 +7,9 @@ use std::fs;
 fn load_or_init_creates_default_config_and_permissions() {
     // Use a temp HOME to avoid touching the real user config.
     let dir = tempfile::tempdir().unwrap();
-    unsafe { std::env::set_var("HOME", dir.path()); }
+    unsafe {
+        std::env::set_var("HOME", dir.path());
+    }
 
     let (cfg, path) = Config::load_or_init(true).expect("load_or_init should succeed");
     assert!(path.exists(), "config file should be created");
@@ -29,7 +31,9 @@ fn load_or_init_creates_default_config_and_permissions() {
 #[serial]
 fn resolve_profile_uses_env_api_key_and_overrides() {
     let dir = tempfile::tempdir().unwrap();
-    unsafe { std::env::set_var("HOME", dir.path()); }
+    unsafe {
+        std::env::set_var("HOME", dir.path());
+    }
 
     // Provide env keys for both providers
     unsafe {
@@ -45,7 +49,26 @@ fn resolve_profile_uses_env_api_key_and_overrides() {
     assert_eq!(eff.api_key, "test-groq");
 
     // Override profile and model
-    let eff2 = cfg.resolve_profile(Some("openai"), Some("gpt-5-mini")).unwrap();
+    let eff2 = cfg
+        .resolve_profile(Some("openai"), Some("gpt-5-mini"))
+        .unwrap();
     assert_eq!(eff2.model, "gpt-5-mini");
     assert_eq!(eff2.api_key, "test-openai");
+}
+
+#[test]
+#[serial]
+fn command_allowlist_roundtrip() {
+    let dir = tempfile::tempdir().unwrap();
+    unsafe {
+        std::env::set_var("HOME", dir.path());
+    }
+
+    let (mut cfg, path) = Config::load_or_init(false).unwrap();
+    assert!(cfg.command_allowlist().is_empty());
+    assert!(cfg.add_command_to_allowlist("ffmpeg"));
+    cfg.save(&path, false).unwrap();
+
+    let (cfg2, _) = Config::load_or_init(false).unwrap();
+    assert!(cfg2.command_allowlist().contains(&"ffmpeg".to_string()));
 }

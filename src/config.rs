@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use fs_err as fs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -33,6 +33,9 @@ pub struct Config {
     /// If present and not equal to "0" or "false" (case-insensitive), emojis are disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_emoji: Option<String>,
+    /// Optional list of additional commands allowed for qa execute_command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_allowlist: Option<Vec<String>>,
 }
 
 impl Default for Config {
@@ -57,11 +60,23 @@ impl Default for Config {
                 api_key: None,
             },
         );
+        model_providers.insert(
+            "anthropic".to_string(),
+            ModelProvider {
+                name: "Anthropic".to_string(),
+                base_url: "https://api.anthropic.com/v1".to_string(),
+                env_key: "ANTHROPIC_API_KEY".to_string(),
+                api_key: None,
+            },
+        );
 
         let mut profiles = HashMap::new();
         profiles.insert(
             "openai".to_string(),
-            Profile { model_provider: "openai".to_string(), model: "gpt-5-mini".to_string() },
+            Profile {
+                model_provider: "openai".to_string(),
+                model: "gpt-5-mini".to_string(),
+            },
         );
         profiles.insert(
             "groq".to_string(),
@@ -70,8 +85,21 @@ impl Default for Config {
                 model: "openai/gpt-oss-20b".to_string(),
             },
         );
+        profiles.insert(
+            "anthropic".to_string(),
+            Profile {
+                model_provider: "anthropic".to_string(),
+                model: "claude-3-5-sonnet-20241022".to_string(),
+            },
+        );
 
-        Self { default_profile: "groq".to_string(), model_providers, profiles, no_emoji: None }
+        Self {
+            default_profile: "groq".to_string(),
+            model_providers,
+            profiles,
+            no_emoji: None,
+            command_allowlist: None,
+        }
     }
 }
 
@@ -92,19 +120,23 @@ impl Config {
         let path = dir.join(CONFIG_FILE_NAME);
 
         if !dir.exists() {
-            fs::create_dir_all(&dir).with_context(|| format!("Creating config dir: {}", dir.display()))?;
+            fs::create_dir_all(&dir)
+                .with_context(|| format!("Creating config dir: {}", dir.display()))?;
             set_permissions_dir(&dir, debug).ok();
         }
 
         if path.exists() {
-            let bytes = fs::read(&path).with_context(|| format!("Reading config: {}", path.display()))?;
-            let cfg: Config = serde_json::from_slice(&bytes).with_context(|| "Parsing config JSON")?;
+            let bytes =
+                fs::read(&path).with_context(|| format!("Reading config: {}", path.display()))?;
+            let cfg: Config =
+                serde_json::from_slice(&bytes).with_context(|| "Parsing config JSON")?;
             set_permissions_file(&path, debug).ok();
             Ok((cfg, path))
         } else {
             let cfg = Config::default();
             let json = serde_json::to_vec_pretty(&cfg).unwrap();
-            fs::write(&path, json).with_context(|| format!("Writing default config: {}", path.display()))?;
+            fs::write(&path, json)
+                .with_context(|| format!("Writing default config: {}", path.display()))?;
             set_permissions_file(&path, debug).ok();
             Ok((cfg, path))
         }
@@ -129,8 +161,30 @@ impl Config {
         }
     }
 
+    /// Commands explicitly allowed by the user for qa's execute_command tool.
+    pub fn command_allowlist(&self) -> Vec<String> {
+        self.command_allowlist.clone().unwrap_or_default()
+    }
+
+    /// Add a command to the custom allowlist. Returns true if the command was newly inserted.
+    pub fn add_command_to_allowlist(&mut self, command: &str) -> bool {
+        let entry = self.command_allowlist.get_or_insert_with(Vec::new);
+        if entry.iter().any(|c| c == command) {
+            false
+        } else {
+            entry.push(command.to_string());
+            entry.sort();
+            entry.dedup();
+            true
+        }
+    }
+
     /// Resolve the effective profile based on optional CLI overrides for profile name and model.
-    pub fn resolve_profile(&self, profile_opt: Option<&str>, model_override: Option<&str>) -> Result<EffectiveProfile> {
+    pub fn resolve_profile(
+        &self,
+        profile_opt: Option<&str>,
+        model_override: Option<&str>,
+    ) -> Result<EffectiveProfile> {
         let profile_name = profile_opt.unwrap_or(&self.default_profile);
         let profile = self
             .profiles
@@ -146,16 +200,24 @@ impl Config {
         let base_url = provider.base_url.clone();
 
         // Prefer inline api_key; else env var per env_key.
-        let api_key = if let Some(k) = provider.api_key.clone() { k } else {
+        let api_key = if let Some(k) = provider.api_key.clone() {
+            k
+        } else {
             std::env::var(&provider.env_key).map_err(|_| {
                 anyhow!(
                     "Missing API key: set '{}' env var or add 'api_key' to provider '{}' in config",
-                    provider.env_key, provider_key
+                    provider.env_key,
+                    provider_key
                 )
             })?
         };
 
-        Ok(EffectiveProfile { provider_key: provider_key.clone(), model, base_url, api_key })
+        Ok(EffectiveProfile {
+            provider_key: provider_key.clone(),
+            model,
+            base_url,
+            api_key,
+        })
     }
 
     /// Interactive initializer that writes a fresh config and allows choosing
@@ -169,7 +231,8 @@ impl Config {
         let path = dir.join(CONFIG_FILE_NAME);
 
         if !dir.exists() {
-            fs::create_dir_all(&dir).with_context(|| format!("Creating config dir: {}", dir.display()))?;
+            fs::create_dir_all(&dir)
+                .with_context(|| format!("Creating config dir: {}", dir.display()))?;
             set_permissions_dir(&dir, debug).ok();
         }
 
@@ -179,13 +242,15 @@ impl Config {
         println!("\nChoose default profile:");
         println!("  [1] Groq  — openai/gpt-oss-20b (fast, cheap)");
         println!("  [2] OpenAI — gpt-5-mini (slower, a bit smarter)");
-        print!("Enter 1 or 2 [1]: ");
+        println!("  [3] Anthropic — claude-3-5-sonnet-20241022 (Claude by Anthropic)");
+        print!("Enter 1, 2, or 3 [1]: ");
         io::stdout().flush().ok();
         let mut choice = String::new();
         io::stdin().read_line(&mut choice).ok();
         let choice = choice.trim();
         match choice {
             "2" | "openai" => cfg.default_profile = "openai".to_string(),
+            "3" | "anthropic" => cfg.default_profile = "anthropic".to_string(),
             _ => cfg.default_profile = "groq".to_string(),
         }
 
@@ -225,7 +290,11 @@ impl Config {
         let json = serde_json::to_vec_pretty(&cfg)?;
         fs::write(&path, json).with_context(|| format!("Writing config: {}", path.display()))?;
         set_permissions_file(&path, debug).ok();
-        println!("\nWrote {} with default profile '{}'.", path.display(), cfg.default_profile);
+        println!(
+            "\nWrote {} with default profile '{}'.",
+            path.display(),
+            cfg.default_profile
+        );
         Ok(path)
     }
 }
