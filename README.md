@@ -38,7 +38,7 @@ The tools may include transient context you choose to provide:
 
 ## Why we recommend using Groq by default
 
-For fast feedback loops, speed and cost matter. The included `groq` profile targets Groq's OpenAI compatible API and the model `openai/gpt-oss-20b`. We recommend Groq for really fast inference speed at roughly 1000 tokens per minute and at a low price point compared to many alternatives. Set `GROQ_API_KEY` and you are ready to go.
+For fast feedback loops, speed and cost matter. The included `groq` profile targets Groq's OpenAI compatible API and the model `openai/gpt-oss-20b`. We recommend Groq for really fast inference speed at roughly 1000 tokens per second and at a low price point compared to many alternatives. Set `GROQ_API_KEY` and you are ready to go.
 
 You can still use OpenAI or any other OpenAI compatible provider by adding a provider entry and a profile in `~/.qq/config.json`.
 
@@ -72,6 +72,8 @@ qq --init
 # or
 qa --init
 ```
+
+If `~/.qq/config.json` already exists, the init command keeps it untouched and explains how to rerun after moving or deleting the file.
 
 The initializer lets you choose the default provider:
 
