@@ -49,7 +49,7 @@ You can still use OpenAI or any other OpenAI compatible provider by adding a pro
 
 ## Install
 
-Download a prebuilt archive from the `releases/` directory (or the GitHub Releases page) for your platform, then extract and place the binaries on your `PATH`.
+Download a prebuilt archive from the [releases](https://github.com/matisojka/qqqa/tags) directory (or the GitHub Releases page) for your platform, then extract and place the binaries on your `PATH`.
 
 Common targets:
 
