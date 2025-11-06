@@ -2,8 +2,8 @@ use httpmock::Method::POST;
 use httpmock::MockServer;
 use httpmock::prelude::HttpMockRequest;
 use qqqa::ai::ChatClient;
-use std::net::TcpListener;
 use serde_json::Value;
+use std::net::TcpListener;
 
 fn sandbox_blocks_binding() -> bool {
     TcpListener::bind("127.0.0.1:0").is_err()
@@ -73,11 +73,15 @@ async fn chat_once_uses_new_parameters_for_new_models() {
                     .body
                     .as_ref()
                     .expect("expected request body for new model");
-                let payload: Value = serde_json::from_slice(body)
-                    .expect("request body should be valid JSON");
+                let payload: Value =
+                    serde_json::from_slice(body).expect("request body should be valid JSON");
                 assert!(payload.get("max_completion_tokens").is_some());
                 assert!(payload.get("max_tokens").is_none());
                 assert!(payload.get("temperature").is_none());
+                assert_eq!(
+                    payload.get("reasoning_effort").and_then(|v| v.as_str()),
+                    Some("minimal")
+                );
                 true
             });
         then.status(200)
@@ -106,11 +110,18 @@ async fn chat_once_uses_legacy_parameters_for_old_models() {
                     .body
                     .as_ref()
                     .expect("expected request body for legacy model");
-                let payload: Value = serde_json::from_slice(body)
-                    .expect("request body should be valid JSON");
-                assert_eq!(payload.get("max_tokens").and_then(|v| v.as_u64()), Some(4000));
+                let payload: Value =
+                    serde_json::from_slice(body).expect("request body should be valid JSON");
+                assert_eq!(
+                    payload.get("max_tokens").and_then(|v| v.as_u64()),
+                    Some(4000)
+                );
                 assert!(payload.get("max_completion_tokens").is_none());
-                assert_eq!(payload.get("temperature").and_then(|v| v.as_f64()), Some(0.0));
+                assert_eq!(
+                    payload.get("temperature").and_then(|v| v.as_f64()),
+                    Some(0.0)
+                );
+                assert!(payload.get("reasoning_effort").is_none());
                 true
             });
         then.status(200)
@@ -120,6 +131,42 @@ async fn chat_once_uses_legacy_parameters_for_old_models() {
 
     let client = ChatClient::new(server.base_url(), "test".into()).unwrap();
     let got = client.chat_once("gpt-4.1-mini", "Hi", false).await.unwrap();
+    assert_eq!(got, "ok");
+    mock.assert();
+}
+
+#[tokio::test]
+async fn chat_once_respects_reasoning_override_when_configured() {
+    if sandbox_blocks_binding() {
+        eprintln!("[skip] sandbox blocks binding to 127.0.0.1; skipping httpmock test");
+        return;
+    }
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/chat/completions")
+            .matches(|req: &HttpMockRequest| {
+                let body = req
+                    .body
+                    .as_ref()
+                    .expect("expected request body for override model");
+                let payload: Value =
+                    serde_json::from_slice(body).expect("request body should be valid JSON");
+                assert_eq!(
+                    payload.get("reasoning_effort").and_then(|v| v.as_str()),
+                    Some("high")
+                );
+                true
+            });
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"choices":[{"message":{"content":"ok"}}]}"#);
+    });
+
+    let client = ChatClient::new(server.base_url(), "test".into())
+        .unwrap()
+        .with_reasoning_effort(Some("high".to_string()));
+    let got = client.chat_once("gpt-5-mini", "Hi", false).await.unwrap();
     assert_eq!(got, "ok");
     mock.assert();
 }

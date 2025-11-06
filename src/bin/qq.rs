@@ -159,7 +159,8 @@ async fn main() -> Result<()> {
     );
 
     // Prepare HTTP client.
-    let client = ChatClient::new(eff.base_url, eff.api_key)?;
+    let client = ChatClient::new(eff.base_url.clone(), eff.api_key.clone())?
+        .with_reasoning_effort(eff.reasoning_effort.clone());
 
     // Stream or buffered request per flag.
     if cli.stream {

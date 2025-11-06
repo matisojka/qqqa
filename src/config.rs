@@ -35,6 +35,8 @@ pub struct ModelProvider {
 pub struct Profile {
     pub model_provider: String,
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +93,7 @@ impl Default for Config {
             Profile {
                 model_provider: "openai".to_string(),
                 model: "gpt-5-mini".to_string(),
+                reasoning_effort: None,
             },
         );
         profiles.insert(
@@ -98,6 +101,7 @@ impl Default for Config {
             Profile {
                 model_provider: "groq".to_string(),
                 model: "openai/gpt-oss-20b".to_string(),
+                reasoning_effort: None,
             },
         );
         profiles.insert(
@@ -105,6 +109,7 @@ impl Default for Config {
             Profile {
                 model_provider: "anthropic".to_string(),
                 model: "claude-3-5-sonnet-20241022".to_string(),
+                reasoning_effort: None,
             },
         );
 
@@ -126,6 +131,7 @@ pub struct EffectiveProfile {
     pub model: String,
     pub base_url: String,
     pub api_key: String,
+    pub reasoning_effort: Option<String>,
 }
 
 impl Config {
@@ -243,6 +249,7 @@ impl Config {
             model,
             base_url,
             api_key,
+            reasoning_effort: profile.reasoning_effort.clone(),
         })
     }
 
