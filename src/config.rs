@@ -74,6 +74,16 @@ impl Default for Config {
             },
         );
         model_providers.insert(
+            "openrouter".to_string(),
+            ModelProvider {
+                name: "OpenRouter".to_string(),
+                base_url: "https://openrouter.ai/api/v1".to_string(),
+                env_key: "OPENROUTER_API_KEY".to_string(),
+                api_key: None,
+                local: false,
+            },
+        );
+        model_providers.insert(
             "groq".to_string(),
             ModelProvider {
                 name: "Groq".to_string(),
@@ -105,6 +115,14 @@ impl Default for Config {
         );
 
         let mut profiles = HashMap::new();
+        profiles.insert(
+            "openrouter".to_string(),
+            Profile {
+                model_provider: "openrouter".to_string(),
+                model: "openai/gpt-4.1-nano".to_string(),
+                reasoning_effort: None,
+            },
+        );
         profiles.insert(
             "openai".to_string(),
             Profile {
@@ -139,7 +157,7 @@ impl Default for Config {
         );
 
         Self {
-            default_profile: "groq".to_string(),
+            default_profile: "openrouter".to_string(),
             model_providers,
             profiles,
             include_history: false,
@@ -158,6 +176,7 @@ pub struct EffectiveProfile {
     pub api_key: String,
     pub reasoning_effort: Option<String>,
     pub is_local: bool,
+    pub headers: HashMap<String, String>,
 }
 
 impl Config {
@@ -256,6 +275,7 @@ impl Config {
 
         let model = model_override.unwrap_or(&profile.model).to_string();
         let base_url = provider.base_url.clone();
+        let headers = provider_default_headers(provider_key);
 
         // Prefer inline api_key; else env var per env_key. Local providers fall back to a
         // placeholder key so callers can continue to send an Authorization header.
@@ -280,6 +300,7 @@ impl Config {
             api_key,
             reasoning_effort: profile.reasoning_effort.clone(),
             is_local: provider.local,
+            headers,
         })
     }
 
@@ -307,20 +328,23 @@ impl Config {
 
         println!("qqqa init — set up your provider and API key");
         println!("\nChoose default profile:");
-        println!("  [1] Groq  — openai/gpt-oss-20b (fast, cheap)");
-        println!("  [2] OpenAI — gpt-5-mini (slower, a bit smarter)");
-        println!("  [3] Anthropic — claude-3-5-sonnet-20241022 (Claude by Anthropic)");
-        println!("  [4] Ollama — llama3.1 via http://127.0.0.1:11434/v1 (runs locally)");
-        print!("Enter 1, 2, 3, or 4 [1]: ");
+        println!("  [1] OpenRouter — openai/gpt-4.1-nano (fast, inexpensive)");
+        println!("  [2] Groq  — openai/gpt-oss-20b (fast, cheap)");
+        println!("  [3] OpenAI — gpt-5-mini (slower, a bit smarter)");
+        println!("  [4] Anthropic — claude-3-5-sonnet-20241022 (Claude by Anthropic)");
+        println!("  [5] Ollama — llama3.1 via http://127.0.0.1:11434/v1 (runs locally)");
+        print!("Enter 1, 2, 3, 4, or 5 [1]: ");
         io::stdout().flush().ok();
         let mut choice = String::new();
         io::stdin().read_line(&mut choice).ok();
         let choice = choice.trim();
         match choice {
-            "2" | "openai" => cfg.default_profile = "openai".to_string(),
-            "3" | "anthropic" => cfg.default_profile = "anthropic".to_string(),
-            "4" | "ollama" => cfg.default_profile = "ollama".to_string(),
-            _ => cfg.default_profile = "groq".to_string(),
+            "2" | "groq" => cfg.default_profile = "groq".to_string(),
+            "3" | "openai" => cfg.default_profile = "openai".to_string(),
+            "4" | "anthropic" => cfg.default_profile = "anthropic".to_string(),
+            "5" | "ollama" => cfg.default_profile = "ollama".to_string(),
+            "1" | "openrouter" => cfg.default_profile = "openrouter".to_string(),
+            _ => cfg.default_profile = "openrouter".to_string(),
         }
 
         // Ask for API key for the chosen provider (optional).
@@ -404,6 +428,21 @@ impl Config {
             cfg.default_profile
         );
         Ok(path)
+    }
+}
+
+fn provider_default_headers(provider_key: &str) -> HashMap<String, String> {
+    match provider_key {
+        "openrouter" => {
+            let mut headers = HashMap::new();
+            headers.insert(
+                "HTTP-Referer".to_string(),
+                "https://github.com/iagooar/qqqa".to_string(),
+            );
+            headers.insert("X-Title".to_string(), "qqqa".to_string());
+            headers
+        }
+        _ => HashMap::new(),
     }
 }
 

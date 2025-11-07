@@ -17,6 +17,7 @@ fn run_init_with_bin(bin: &str, input: &str) -> Config {
         // Remove env vars so prompts behave consistently in tests.
         .env_remove("GROQ_API_KEY")
         .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENROUTER_API_KEY")
         .env_remove("ANTHROPIC_API_KEY")
         .env_remove("OLLAMA_API_KEY")
         .write_stdin(input);
@@ -51,9 +52,9 @@ fn local_provider_uses_placeholder_api_key_when_env_missing() {
 
 #[test]
 #[serial]
-fn init_defaults_to_groq_profile_and_keeps_history_off() {
+fn init_defaults_to_openrouter_profile_and_keeps_history_off() {
     let cfg = run_qq_init("\n\nn\n");
-    assert_eq!(cfg.default_profile, "groq");
+    assert_eq!(cfg.default_profile, "openrouter");
     assert!(!cfg.history_enabled());
 }
 
@@ -61,7 +62,7 @@ fn init_defaults_to_groq_profile_and_keeps_history_off() {
 #[serial]
 fn init_allows_custom_local_base_url() {
     let custom_base = "http://127.0.0.1:1234/v1";
-    let input = format!("4\n\n{}\nn\n", custom_base);
+    let input = format!("5\n\n{}\nn\n", custom_base);
     let cfg = run_qq_init(&input);
     assert_eq!(cfg.default_profile, "ollama");
     let provider = cfg
@@ -73,22 +74,20 @@ fn init_allows_custom_local_base_url() {
 
 #[test]
 #[serial]
-fn qa_init_defaults_to_groq_profile() {
+fn qa_init_defaults_to_openrouter_profile() {
     let cfg = run_qa_init("\n\nn\n");
-    assert_eq!(cfg.default_profile, "groq");
+    assert_eq!(cfg.default_profile, "openrouter");
     assert!(!cfg.history_enabled());
 }
 
 #[test]
 #[serial]
 fn qa_init_can_select_openai_without_affecting_others() {
-    let cfg = run_qa_init("2\n\nn\n");
+    let cfg = run_qa_init("3\n\nn\n");
     assert_eq!(cfg.default_profile, "openai");
     let defaults = Config::default();
     assert_eq!(
-        cfg.model_providers
-            .get("groq")
-            .map(|p| &p.base_url),
+        cfg.model_providers.get("groq").map(|p| &p.base_url),
         defaults.model_providers.get("groq").map(|p| &p.base_url)
     );
 }
@@ -97,19 +96,15 @@ fn qa_init_can_select_openai_without_affecting_others() {
 #[serial]
 fn ollama_init_does_not_mutate_remote_providers() {
     let custom_base = "http://127.0.0.1:4321/v1";
-    let input = format!("4\n\n{}\nn\n", custom_base);
+    let input = format!("5\n\n{}\nn\n", custom_base);
     let cfg = run_qa_init(&input);
     let defaults = Config::default();
     assert_eq!(
-        cfg.model_providers
-            .get("groq")
-            .map(|p| &p.base_url),
+        cfg.model_providers.get("groq").map(|p| &p.base_url),
         defaults.model_providers.get("groq").map(|p| &p.base_url)
     );
     assert_eq!(
-        cfg.model_providers
-            .get("openai")
-            .map(|p| &p.base_url),
+        cfg.model_providers.get("openai").map(|p| &p.base_url),
         defaults.model_providers.get("openai").map(|p| &p.base_url)
     );
     assert_eq!(

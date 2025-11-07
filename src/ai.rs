@@ -1,9 +1,11 @@
 use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
 use futures_util::StreamExt;
-use reqwest::Client;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use reqwest::{Client, RequestBuilder};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::time::Duration;
 
 const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 4000;
@@ -89,26 +91,48 @@ pub struct ChatClient {
     base_url: String,
     api_key: String,
     reasoning_effort: Option<String>,
+    default_headers: HeaderMap,
 }
 
 impl ChatClient {
-    pub fn new(base_url: String, api_key: String) -> Result<Self> {
+    pub fn new(
+        base_url: String,
+        api_key: String,
+        headers: HashMap<String, String>,
+    ) -> Result<Self> {
         // Use rustls for TLS; set useful timeouts for robustness.
         let client = Client::builder()
             .timeout(Duration::from_secs(60))
             .connect_timeout(Duration::from_secs(10))
             .build()?;
+        let mut default_headers = HeaderMap::new();
+        for (name, value) in headers {
+            let header_name = HeaderName::from_bytes(name.as_bytes())
+                .with_context(|| format!("Invalid header name '{}': must be ASCII", name))?;
+            let header_value = HeaderValue::from_str(&value)
+                .with_context(|| format!("Invalid header value for '{}': {}", name, value))?;
+            default_headers.insert(header_name, header_value);
+        }
         Ok(Self {
             client,
             base_url,
             api_key,
             reasoning_effort: None,
+            default_headers,
         })
     }
 
     pub fn with_reasoning_effort(mut self, reasoning_effort: Option<String>) -> Self {
         self.reasoning_effort = reasoning_effort;
         self
+    }
+
+    fn request_builder(&self) -> RequestBuilder {
+        let mut builder = self.client.post(self.chat_url());
+        if !self.default_headers.is_empty() {
+            builder = builder.headers(self.default_headers.clone());
+        }
+        builder.bearer_auth(&self.api_key)
     }
 
     fn is_new_style_model(model: &str) -> bool {
@@ -180,9 +204,7 @@ impl ChatClient {
             eprintln!("[debug] POST {} ({} bytes)", self.chat_url(), bytes.len());
         }
         let resp = self
-            .client
-            .post(self.chat_url())
-            .bearer_auth(&self.api_key)
+            .request_builder()
             .json(&body)
             .send()
             .await
@@ -219,9 +241,7 @@ impl ChatClient {
             eprintln!("[debug] POST {} ({} bytes)", self.chat_url(), bytes.len());
         }
         let resp = self
-            .client
-            .post(self.chat_url())
-            .bearer_auth(&self.api_key)
+            .request_builder()
             .json(&body)
             .send()
             .await
@@ -260,9 +280,7 @@ impl ChatClient {
             eprintln!("[debug] POST {} ({} bytes)", self.chat_url(), bytes.len());
         }
         let resp = self
-            .client
-            .post(self.chat_url())
-            .bearer_auth(&self.api_key)
+            .request_builder()
             .json(&body)
             .send()
             .await
@@ -322,9 +340,7 @@ impl ChatClient {
             );
         }
         let resp = self
-            .client
-            .post(self.chat_url())
-            .bearer_auth(&self.api_key)
+            .request_builder()
             .json(&body)
             .send()
             .await
@@ -404,9 +420,7 @@ impl ChatClient {
             );
         }
         let resp = self
-            .client
-            .post(self.chat_url())
-            .bearer_auth(&self.api_key)
+            .request_builder()
             .json(&body)
             .send()
             .await

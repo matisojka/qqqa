@@ -33,6 +33,6 @@
 
 ## Security & Configuration Tips
 - Config path: `~/.qq/config.json`; enforce permissions (dir `700`, file `600`).
-- API keys via env: `OPENAI_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`; never commit secrets.
+- API keys via env: `OPENROUTER_API_KEY` (default), `OPENAI_API_KEY`, `GROQ_API_KEY`, `ANTHROPIC_API_KEY`; never commit secrets.
 - Agent (`qa`): print proposed commands, require confirmation unless `--yes`; avoid destructive patterns and paths outside the workspace/home.
 - Command allowlist: default safe commands are bundled. Approving a blocked binary persists it under `command_allowlist` in `~/.qq/config.json` for future runs.
