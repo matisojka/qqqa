@@ -170,16 +170,34 @@ tar -C "$src_stage" -czf "$src_tarball" "$src_dir"
 rm -rf "$src_stage"
 src_sha=$(shasum -a 256 "$src_tarball" | awk '{print $1}')
 
+# Homebrew tap handling now relies on the GitHub tag archive (always available once the tag exists)
 tap_formula="homebrew-tap/Formula/qqqa.rb"
+tap_url="https://github.com/iagooar/qqqa/archive/refs/tags/v${ver}.tar.gz"
+tap_checksum_cmd=""
+if command -v shasum >/dev/null 2>&1; then
+  tap_checksum_cmd="shasum -a 256"
+elif command -v sha256sum >/dev/null 2>&1; then
+  tap_checksum_cmd="sha256sum"
+fi
 if [[ -f "$tap_formula" ]]; then
-  python3 <<PY
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "==> WARN: curl not found; skipping Homebrew formula update." >&2
+  elif [[ -z "$tap_checksum_cmd" ]]; then
+    echo "==> WARN: no shasum/sha256sum available; skipping Homebrew formula update." >&2
+  else
+    tap_tmp=$(mktemp)
+    echo "==> Downloading ${tap_url} to compute Homebrew checksum"
+    if curl -fsSL "$tap_url" -o "$tap_tmp"; then
+      tap_sha=$($tap_checksum_cmd "$tap_tmp" | awk '{print $1}')
+      rm -f "$tap_tmp"
+      python3 <<PY
 from pathlib import Path
 import re
 
 formula = Path("$tap_formula")
 ver = "$ver"
-sha = "$src_sha"
-url = f"https://github.com/iagooar/qqqa/releases/download/v{ver}/qqqa-v{ver}-src.tar.gz"
+sha = "$tap_sha"
+url = "$tap_url"
 
 text = formula.read_text()
 text = re.sub(r'url "[^"]+"', f'url "{url}"', text)
@@ -191,8 +209,13 @@ else:
 
 formula.write_text(text)
 PY
-  echo "==> Updated Homebrew formula at $tap_formula"
-  echo "    Remember to commit and push the tap repository (homebrew-tap)."
+      echo "==> Updated Homebrew formula at $tap_formula"
+      echo "    Remember to commit and push the tap repository (homebrew-tap)."
+    else
+      echo "==> WARN: failed to download ${tap_url}; skipping Homebrew formula update." >&2
+      rm -f "$tap_tmp"
+    fi
+  fi
 else
   echo "==> Skipping Homebrew formula update (homebrew-tap/Formula/qqqa.rb not found)."
 fi
@@ -239,11 +262,27 @@ echo "==> Writing manifest ${manifest_file}"
 } > "$manifest_file"
 
 echo "==> Done. Artifacts staged under ${artifact_root}/"
-echo "    Remember to commit the version bump and tag the release:"
-echo "      git add Cargo.toml && git commit -m 'release: v${ver}'"
+echo "==> Next steps"
+cat <<EOF
+  1. Review README/docs for accuracy (update manually if needed).
+  2. Commit the version bump + tap update (artifacts stay under target/ and remain ignored):
+       git add Cargo.toml homebrew-tap/Formula/qqqa.rb
+       git commit -m 'release: v${ver}'
+  3. Tag the release:
+EOF
 if [[ -n "$git_sha" ]]; then
-  echo "      git tag -a v${ver} ${git_sha} -m 'qqqa v${ver}'"
+  echo "       git tag -a v${ver} ${git_sha} -m 'qqqa v${ver}'"
 else
-  echo "      git tag -a v${ver} -m 'qqqa v${ver}'"
+  echo "       git tag -a v${ver} -m 'qqqa v${ver}'"
 fi
-echo "      git push && git push --tags"
+cat <<EOF
+  4. Push code and tag:
+       git push && git push --tags
+  5. Publish GitHub release (after push):
+       gh release create v${ver} target/releases/v${ver}/qqqa-v${ver}-*.tar.gz \\
+         target/releases/v${ver}/qqqa-v${ver}-src.tar.gz target/releases/v${ver}/manifest.json \\
+         --title "qqqa v${ver}" --notes-file docs/RELEASE_NOTES_TEMPLATE.md
+  6. Update the Homebrew tap repo:
+       (cd homebrew-tap && git add Formula/qqqa.rb && git commit -m 'qqqa v${ver}' && git push)
+  7. Announce the release / publish notes as needed.
+EOF
