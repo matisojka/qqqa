@@ -3,6 +3,7 @@ use httpmock::MockServer;
 use httpmock::prelude::HttpMockRequest;
 use qqqa::ai::ChatClient;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::net::TcpListener;
 
 fn sandbox_blocks_binding() -> bool {
@@ -23,7 +24,7 @@ async fn chat_once_non_streaming_parses_response() {
             .body(r#"{"choices":[{"message":{"content":"Hello world"}}]}"#);
     });
 
-    let client = ChatClient::new(server.base_url(), "test".into()).unwrap();
+    let client = ChatClient::new(server.base_url(), "test".into(), HashMap::new()).unwrap();
     let got = client.chat_once("model-x", "Hi", true).await.unwrap();
     assert_eq!(got, "Hello world");
     mock.assert();
@@ -48,7 +49,7 @@ async fn chat_stream_streams_tokens() {
             .body(sse_body);
     });
 
-    let client = ChatClient::new(server.base_url(), "test".into()).unwrap();
+    let client = ChatClient::new(server.base_url(), "test".into(), HashMap::new()).unwrap();
     let mut acc = String::new();
     client
         .chat_stream("model-x", "Hi", true, |tok| acc.push_str(tok))
@@ -89,7 +90,7 @@ async fn chat_once_uses_new_parameters_for_new_models() {
             .body(r#"{"choices":[{"message":{"content":"ok"}}]}"#);
     });
 
-    let client = ChatClient::new(server.base_url(), "test".into()).unwrap();
+    let client = ChatClient::new(server.base_url(), "test".into(), HashMap::new()).unwrap();
     let got = client.chat_once("gpt-5-mini", "Hi", false).await.unwrap();
     assert_eq!(got, "ok");
     mock.assert();
@@ -129,7 +130,7 @@ async fn chat_once_uses_legacy_parameters_for_old_models() {
             .body(r#"{"choices":[{"message":{"content":"ok"}}]}"#);
     });
 
-    let client = ChatClient::new(server.base_url(), "test".into()).unwrap();
+    let client = ChatClient::new(server.base_url(), "test".into(), HashMap::new()).unwrap();
     let got = client.chat_once("gpt-4.1-mini", "Hi", false).await.unwrap();
     assert_eq!(got, "ok");
     mock.assert();
@@ -163,10 +164,40 @@ async fn chat_once_respects_reasoning_override_when_configured() {
             .body(r#"{"choices":[{"message":{"content":"ok"}}]}"#);
     });
 
-    let client = ChatClient::new(server.base_url(), "test".into())
+    let client = ChatClient::new(server.base_url(), "test".into(), HashMap::new())
         .unwrap()
         .with_reasoning_effort(Some("high".to_string()));
     let got = client.chat_once("gpt-5-mini", "Hi", false).await.unwrap();
+    assert_eq!(got, "ok");
+    mock.assert();
+}
+
+#[tokio::test]
+async fn chat_client_sends_custom_headers() {
+    if sandbox_blocks_binding() {
+        eprintln!("[skip] sandbox blocks binding to 127.0.0.1; skipping httpmock test");
+        return;
+    }
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/chat/completions")
+            .header("HTTP-Referer", "https://github.com/iagooar/qqqa")
+            .header("X-Title", "qqqa");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"choices":[{"message":{"content":"ok"}}]}"#);
+    });
+
+    let mut headers = HashMap::new();
+    headers.insert(
+        "HTTP-Referer".to_string(),
+        "https://github.com/iagooar/qqqa".to_string(),
+    );
+    headers.insert("X-Title".to_string(), "qqqa".to_string());
+
+    let client = ChatClient::new(server.base_url(), "test".into(), headers).unwrap();
+    let got = client.chat_once("model-x", "Hi", false).await.unwrap();
     assert_eq!(got, "ok");
     mock.assert();
 }

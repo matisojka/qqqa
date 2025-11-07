@@ -11,7 +11,7 @@ The two binaries are:
 - `qq` - ask a single question, e.g. "qq how can I recursively list all files in this directory" (qq stands for "quick question")
 - `qa` - a single step agent that can optionally use tools to finish a task: read a file, write a file, or execute a command with confirmation (qa stands for "quick agent")
 
-By default the repo includes profiles for OpenAI, Groq, and a local Ollama runtime. An Anthropic profile stub exists in the config for future work but is not wired up yet.
+By default the repo includes profiles for OpenRouter (default), OpenAI, Groq, and a local Ollama runtime. An Anthropic profile stub exists in the config for future work but is not wired up yet.
 
 
 
@@ -38,11 +38,11 @@ The tools may include transient context you choose to provide:
 - `qq` can include the last few terminal commands as hints and piped stdin if present.
 - `qa` can read files or run a specific command, but only once per invocation and with safety checks.
 
-## Why we recommend using Groq by default
+## Why we recommend using OpenRouter by default
 
-For fast feedback loops, speed and cost matter. The included `groq` profile targets Groq's OpenAI compatible API and the model `openai/gpt-oss-20b`. We recommend Groq for really fast inference speed at roughly 1000 tokens per second and at a low price point compared to many alternatives. Set `GROQ_API_KEY` and you are ready to go.
+OpenRouter mirrors the OpenAI Chat Completions API, adds generous community-hosted models, and keeps `openai/gpt-4.1-nano` fast and inexpensive. We configure qqqa to talk to `https://openrouter.ai/api/v1` out of the box, inject the required `HTTP-Referer`/`X-Title` headers, and read the API key from `OPENROUTER_API_KEY`, so your first run works as soon as you drop in a key.
 
-You can still use any OpenAI compatible provider by adding a provider entry and a profile in `~/.qq/config.json`.
+If you need even more throughput, the bundled `groq` profile that targets `openai/gpt-oss-20b` remains available, and you can still add any OpenAI-compatible provider by editing `~/.qq/config.json` or creating a new profile.
 
 ## Features
 
@@ -83,14 +83,15 @@ If `~/.qq/config.json` already exists, the init command keeps it untouched and e
 
 The initializer lets you choose the default provider:
 
-- Groq + `openai/gpt-oss-20b` (faster, cheaper)
+- OpenRouter + `openai/gpt-4.1-nano` (default, fast and inexpensive)
+- Groq + `openai/gpt-oss-20b` (faster, cheap paid tier)
 - OpenAI + `gpt-5-mini` (slower, a bit smarter)
+- Anthropic + `claude-3-5-sonnet-20241022` (placeholder until their Messages API finalizes)
 - Ollama (runs locally, adjust port if needed)
-
-> Anthropic support will return once the client speaks their Messages API; for now the initializer only offers OpenAI-compatible providers.
 
 It also offers to store an API key in the config (optional). If you prefer environment variables, leave it blank and set one of:
 
+- `OPENROUTER_API_KEY` for OpenRouter (default)
 - `GROQ_API_KEY` for Groq
 - `OPENAI_API_KEY` for OpenAI
 - `OLLAMA_API_KEY` (optional; any non-empty string works—even `local`—because the Authorization header cannot be blank)
@@ -98,13 +99,15 @@ It also offers to store an API key in the config (optional). If you prefer envir
 Defaults written to `~/.qq/config.json`:
 
 - Providers
+  - `openrouter` → base `https://openrouter.ai/api/v1`, env `OPENROUTER_API_KEY`, default headers `HTTP-Referer=https://github.com/iagooar/qqqa` and `X-Title=qqqa`
   - `openai` → base `https://api.openai.com/v1`, env `OPENAI_API_KEY`
   - `groq` → base `https://api.groq.com/openai/v1`, env `GROQ_API_KEY`
   - `ollama` → base `http://127.0.0.1:11434/v1`, env `OLLAMA_API_KEY` (qqqa auto-injects a non-empty placeholder if you leave it unset)
   - `anthropic` → base `https://api.anthropic.com/v1`, env `ANTHROPIC_API_KEY` (present in the config schema for future support; not usable yet)
 - Profiles
+  - `openrouter` → model `openai/gpt-4.1-nano` (default)
   - `openai` → model `gpt-5-mini`
-  - `groq` → model `openai/gpt-oss-20b` (default)
+  - `groq` → model `openai/gpt-oss-20b`
   - `ollama` → model `llama3.1`
   - `anthropic` → model `claude-3-5-sonnet-20241022` (inactive placeholder until Anthropic integration lands)
 - Optional per-profile `reasoning_effort` for GPT-5 family models. If you leave it unset, qqqa sends `"reasoning_effort": "minimal"` for any `gpt-5*` model to keep responses fast. Set it to `"low"`, `"medium"`, or `"high"` when you want deeper reasoning.
@@ -138,7 +141,7 @@ qa --profile ollama --api-base http://192.168.1.50:9000/v1 "apply the diff" -y
 
 `qa --init` offers Ollama as an option and skips the API key warning; qqqa still sends a placeholder bearer token so OpenAI-compatible middleware keeps working. If you bypass the init flow and edit `config.json` manually, set either `"api_key": "local"` under the `ollama` provider or export `OLLAMA_API_KEY=local` so the Authorization header remains non-empty.
 
-> Example local setup: LM Studio on macOS driving `ollama run meta-llama-3.1-8b-instruct-hf` (Q4_K_M) on a MacBook Air M4/32 GB works fine, just slower than the Groq profile. Adjust the model tag in your `ollama` profile accordingly.
+> Example local setup: LM Studio on macOS driving `ollama run meta-llama-3.1-8b-instruct-hf` (Q4_K_M) on a MacBook Air M4/32 GB works fine, just slower than the hosted OpenRouter/Groq profiles. Adjust the model tag in your `ollama` profile accordingly.
 
 You can still override at runtime:
 
@@ -268,6 +271,7 @@ The runner enforces a default allowlist (think `ls`, `grep`, `find`, `rg`, `awk`
 
 ## Environment variables
 
+- `OPENROUTER_API_KEY` for the OpenRouter provider (default)
 - `GROQ_API_KEY` for the Groq provider
 - `OPENAI_API_KEY` for the OpenAI provider
 
@@ -286,7 +290,7 @@ See CONTRIBUTING.md for guidelines on reporting issues and opening pull requests
 
 ## Troubleshooting
 
-- API error about missing key: run `qq --init` to set things up, or export the relevant env var, e.g. `export GROQ_API_KEY=...`.
+- API error about missing key: run `qq --init` to set things up, or export the relevant env var, e.g. `export OPENROUTER_API_KEY=...`.
 - No output when streaming: try `-d` to see debug logs.
 - Piped input not detected: ensure you are piping into `qq` and not running it in a subshell that swallows stdin.
 

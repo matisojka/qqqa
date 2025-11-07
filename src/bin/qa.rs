@@ -112,7 +112,7 @@ async fn main() -> Result<()> {
             let mut out = msg.clone();
             if msg.contains("Missing API key") {
                 out.push_str(
-                    "\n\nFix it quickly:\n- Run `qa --init` and choose provider; optionally paste the API key.\n- Or export an env var, e.g.\n    export GROQ_API_KEY=...       # Groq\n    export OPENAI_API_KEY=...     # OpenAI\n    export ANTHROPIC_API_KEY=...  # Anthropic (Claude)",
+                    "\n\nFix it quickly:\n- Run `qa --init` and choose provider; optionally paste the API key.\n- Or export an env var, e.g.\n    export OPENROUTER_API_KEY=... # OpenRouter (default)\n    export GROQ_API_KEY=...       # Groq\n    export OPENAI_API_KEY=...     # OpenAI\n    export ANTHROPIC_API_KEY=...  # Anthropic (Claude)",
                 );
             }
             return Err(anyhow!(out));
@@ -151,8 +151,12 @@ async fn main() -> Result<()> {
         &task,
     );
 
-    let client = ChatClient::new(eff.base_url.clone(), eff.api_key.clone())?
-        .with_reasoning_effort(eff.reasoning_effort.clone());
+    let client = ChatClient::new(
+        eff.base_url.clone(),
+        eff.api_key.clone(),
+        eff.headers.clone(),
+    )?
+    .with_reasoning_effort(eff.reasoning_effort.clone());
     // Provide tool specs so the API can emit structured tool_calls instead of erroring.
     let tools_spec = serde_json::json!([
         {
