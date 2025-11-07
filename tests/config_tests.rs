@@ -2,6 +2,7 @@ use assert_cmd::cargo::cargo_bin_cmd;
 use fs_err as fs;
 use qqqa::config::Config;
 use serial_test::serial;
+use std::path::Path;
 use tempfile::tempdir;
 
 fn run_init_with_bin(bin: &str, input: &str) -> Config {
@@ -34,6 +35,12 @@ fn run_qq_init(input: &str) -> Config {
 
 fn run_qa_init(input: &str) -> Config {
     run_init_with_bin("qa", input)
+}
+
+fn read_config_from_home(home: &Path) -> Config {
+    let config_path = home.join(".qq").join("config.json");
+    let bytes = fs::read(&config_path).expect("config json");
+    serde_json::from_slice(&bytes).expect("parse config")
 }
 
 #[test]
@@ -134,4 +141,57 @@ fn qq_init_can_enable_auto_copy_flag() {
     let cfg = run_qq_init("\n\nn\ny\n");
     assert!(!cfg.history_enabled());
     assert!(cfg.copy_first_command_enabled());
+}
+
+#[test]
+#[serial]
+fn qq_enable_auto_copy_flag_persists_without_question() {
+    let home = tempdir().expect("temp dir");
+    let home_path = home.path().to_path_buf();
+    let mut cmd = cargo_bin_cmd!("qq");
+    cmd.arg("--enable-auto-copy")
+        .env("HOME", &home_path)
+        .env_remove("GROQ_API_KEY")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENROUTER_API_KEY")
+        .env_remove("ANTHROPIC_API_KEY")
+        .env_remove("OLLAMA_API_KEY");
+    cmd.assert().success();
+
+    let cfg = read_config_from_home(&home_path);
+    assert!(cfg.copy_first_command_enabled());
+}
+
+#[test]
+#[serial]
+fn qq_disable_auto_copy_flag_persists_without_question() {
+    let home = tempdir().expect("temp dir");
+    let home_path = home.path().to_path_buf();
+
+    let mut enable = cargo_bin_cmd!("qq");
+    enable
+        .arg("--enable-auto-copy")
+        .env("HOME", &home_path)
+        .env_remove("GROQ_API_KEY")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENROUTER_API_KEY")
+        .env_remove("ANTHROPIC_API_KEY")
+        .env_remove("OLLAMA_API_KEY")
+        .assert()
+        .success();
+
+    let mut disable = cargo_bin_cmd!("qq");
+    disable
+        .arg("--disable-auto-copy")
+        .env("HOME", &home_path)
+        .env_remove("GROQ_API_KEY")
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("OPENROUTER_API_KEY")
+        .env_remove("ANTHROPIC_API_KEY")
+        .env_remove("OLLAMA_API_KEY")
+        .assert()
+        .success();
+
+    let cfg = read_config_from_home(&home_path);
+    assert!(!cfg.copy_first_command_enabled());
 }

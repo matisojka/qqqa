@@ -25,6 +25,14 @@ struct Cli {
     /// Disable emojis going forward (persists to config)
     #[arg(long = "no-fun", action = ArgAction::SetTrue)]
     no_fun: bool,
+
+    /// Persistently enable automatic copying of the first <cmd> block
+    #[arg(long = "enable-auto-copy", action = ArgAction::SetTrue, conflicts_with = "disable_auto_copy")]
+    enable_auto_copy: bool,
+
+    /// Persistently disable automatic copying of the first <cmd> block
+    #[arg(long = "disable-auto-copy", action = ArgAction::SetTrue, conflicts_with = "enable_auto_copy")]
+    disable_auto_copy: bool,
     /// Profile name from config to use
     #[arg(short = 'p', long = "profile")]
     profile: Option<String>,
@@ -106,17 +114,9 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Apply persistent emoji-disable if requested.
-    if cli.no_fun {
-        let (mut cfg, path) = Config::load_or_init(cli.debug)?;
-        cfg.no_emoji = Some("true".to_string());
-        cfg.save(&path, cli.debug)?;
-        if cli.debug {
-            eprintln!(
-                "[debug] Disabled emojis in system prompt (persisted at {}).",
-                path.display()
-            );
-        }
+    let config_flags_requested = cli.no_fun || cli.enable_auto_copy || cli.disable_auto_copy;
+    if config_flags_requested {
+        persist_config_flags(&cli)?;
     }
 
     // Detect piped stdin and read it if present.
@@ -129,6 +129,9 @@ async fn main() -> Result<()> {
 
     let prepared = coalesce_prompt_inputs(cli.question.join(" "), stdin_block);
     if prepared.question.trim().is_empty() {
+        if config_flags_requested {
+            return Ok(());
+        }
         return Err(anyhow!(
             "No input provided. Pass a question or pipe stdin (e.g., `ls -la | qq explain`)."
         ));
@@ -363,6 +366,47 @@ fn print_copy_notice(raw_output: bool) {
             render_xmlish_to_ansi("<info>Copied first command to clipboard</info>")
         );
     }
+}
+
+fn persist_config_flags(cli: &Cli) -> Result<()> {
+    let (mut cfg, path) = Config::load_or_init(cli.debug)?;
+    let mut changed = false;
+
+    if cli.no_fun {
+        let desired = Some("true".to_string());
+        if cfg.no_emoji != desired {
+            cfg.no_emoji = desired;
+            changed = true;
+        }
+        if cli.debug {
+            eprintln!(
+                "[debug] Disabled emojis in system prompt (persisted at {}).",
+                path.display()
+            );
+        }
+    }
+
+    if cli.enable_auto_copy {
+        if !cfg.copy_first_command_enabled() {
+            cfg.set_copy_first_command(true);
+            changed = true;
+        }
+        println!("Auto-copy first command: enabled (persisted).");
+    }
+
+    if cli.disable_auto_copy {
+        if cfg.copy_first_command_enabled() {
+            cfg.set_copy_first_command(false);
+            changed = true;
+        }
+        println!("Auto-copy first command: disabled (persisted).");
+    }
+
+    if changed {
+        cfg.save(&path, cli.debug)?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
