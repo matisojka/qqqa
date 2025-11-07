@@ -363,6 +363,24 @@ impl Config {
             }
         }
 
+        if provider.local {
+            let default_base = provider.base_url.clone();
+            println!(
+                "\n{} runs via an OpenAI-compatible server. Override the base URL if you changed the port (default {}).",
+                provider.name, default_base
+            );
+            print!("Base URL [{}]: ", default_base);
+            io::stdout().flush().ok();
+            let mut base_in = String::new();
+            io::stdin().read_line(&mut base_in).ok();
+            let base_in = base_in.trim();
+            if !base_in.is_empty() {
+                if let Some(mp) = cfg.model_providers.get_mut(&provider_key) {
+                    mp.base_url = base_in.to_string();
+                }
+            }
+        }
+
         println!("\nShare recent `qq` / `qa` commands with the model?");
         println!("  Pros: gives follow-up questions more context without copy/paste.");
         println!(
