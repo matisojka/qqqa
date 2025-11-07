@@ -1,4 +1,4 @@
-use crate::perms::ensure_safe_path;
+use crate::perms::{ensure_safe_path, resolve_path};
 use anyhow::{Context, Result};
 use fs_err as fs;
 use serde::Deserialize;
@@ -13,11 +13,13 @@ pub struct Args {
 pub fn run(args: Args) -> Result<String> {
     let path = PathBuf::from(&args.path);
     ensure_safe_path(&path)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).ok();
+    let resolved = resolve_path(&path)?;
+    if let Some(parent) = resolved.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Creating parent directories for {}", resolved.display()))?;
     }
-    fs::write(&path, args.content.as_bytes())
-        .with_context(|| format!("Writing file: {}", path.display()))?;
+    fs::write(&resolved, args.content.as_bytes())
+        .with_context(|| format!("Writing file: {}", resolved.display()))?;
     Ok(format!(
         "Wrote {} ({} bytes)",
         path.display(),

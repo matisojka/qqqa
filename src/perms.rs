@@ -305,7 +305,7 @@ fn enforce_program_specific_rules(program: &str, tokens: &[String]) -> Result<()
     Ok(())
 }
 
-fn resolve_path(p: &Path) -> Result<PathBuf> {
+pub(crate) fn resolve_path(p: &Path) -> Result<PathBuf> {
     if p.is_absolute() {
         Ok(normalize_path(p))
     } else {
