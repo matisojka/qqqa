@@ -127,6 +127,7 @@ Example override in `~/.qq/config.json`:
 ```
 
 - Optional flag: `no_emoji` (unset by default). Set via `qq --no-fun` or `qa --no-fun`.
+- Optional auto-copy: `copy_first_command` (unset/false by default). Enable during `qq --init` or by editing `~/.qq/config.json` so qq copies the first `<cmd>` block to your clipboard. Override per run with `--copy-command`/`--cc` or `--no-copy-command`/`--ncc` (also available as `-ncc`).
 
 Terminal history is **off by default**. During `qq --init` / `qa --init` you can opt in to sending the last 10 `qq`/`qa` commands along with each request. You can still override per run with `--history` (force on) or `-n/--no-history` (force off). Only commands whose first token is `qq` or `qa` are ever shared.
 
@@ -181,6 +182,12 @@ qq --history "find large files in the last day"
 
 # disable emojis in responses (persists)
 qq --no-fun "summarize this"
+
+# auto-copy the first <cmd> block for fast pasting (alias: --cc)
+qq --copy-command "list docker images"
+
+# temporarily disable auto-copy even if enabled in config (alias: --ncc / -ncc)
+qq --no-copy-command "print working directory"
 ```
 
 Note: it is possible to run qq without quotes, which works most of the time the same way as with quotes.

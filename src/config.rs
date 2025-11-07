@@ -50,6 +50,9 @@ pub struct Config {
     pub profiles: HashMap<String, Profile>,
     #[serde(default)]
     pub include_history: bool,
+    /// Automatically copy the first recommended <cmd> block from qq answers.
+    #[serde(default)]
+    pub copy_first_command: bool,
     /// Optional flag to control emoji usage in prompts.
     /// If present and not equal to "0" or "false" (case-insensitive), emojis are disabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -161,6 +164,7 @@ impl Default for Config {
             model_providers,
             profiles,
             include_history: false,
+            copy_first_command: false,
             no_emoji: None,
             command_allowlist: None,
         }
@@ -241,6 +245,16 @@ impl Config {
     /// Persist the history preference toggle.
     pub fn set_history_enabled(&mut self, enabled: bool) {
         self.include_history = enabled;
+    }
+
+    /// Whether qq should copy the first <cmd> block to the clipboard by default.
+    pub fn copy_first_command_enabled(&self) -> bool {
+        self.copy_first_command
+    }
+
+    /// Persist the clipboard auto-copy toggle.
+    pub fn set_copy_first_command(&mut self, enabled: bool) {
+        self.copy_first_command = enabled;
     }
 
     /// Add a command to the custom allowlist. Returns true if the command was newly inserted.
@@ -419,6 +433,19 @@ impl Config {
         let history_enabled = matches!(history_choice.as_str(), "y" | "yes");
         cfg.set_history_enabled(history_enabled);
 
+        println!("\nAuto-copy the first recommended <cmd> block to your clipboard?");
+        println!("  Pros: saves a copy step when you trust your local clipboard.");
+        println!(
+            "  Cons: anything copied becomes visible to other apps that can read the clipboard."
+        );
+        print!("Enable auto-copy by default? [y/N]: ");
+        io::stdout().flush().ok();
+        let mut copy_choice = String::new();
+        io::stdin().read_line(&mut copy_choice).ok();
+        let copy_choice = copy_choice.trim().to_ascii_lowercase();
+        let copy_enabled = matches!(copy_choice.as_str(), "y" | "yes");
+        cfg.set_copy_first_command(copy_enabled);
+
         let json = serde_json::to_vec_pretty(&cfg)?;
         fs::write(&path, json).with_context(|| format!("Writing config: {}", path.display()))?;
         set_permissions_file(&path, debug).ok();
@@ -427,6 +454,12 @@ impl Config {
             path.display(),
             cfg.default_profile
         );
+        let copy_status = if cfg.copy_first_command_enabled() {
+            "enabled"
+        } else {
+            "disabled"
+        };
+        println!("Auto-copy first command: {}.", copy_status);
         Ok(path)
     }
 }

@@ -115,3 +115,23 @@ fn ollama_init_does_not_mutate_remote_providers() {
         Some(custom_base)
     );
 }
+
+#[test]
+#[serial]
+fn config_copy_first_command_defaults_false_and_is_toggleable() {
+    let mut cfg = Config::default();
+    assert!(!cfg.copy_first_command_enabled());
+    cfg.set_copy_first_command(true);
+    assert!(cfg.copy_first_command_enabled());
+    cfg.set_copy_first_command(false);
+    assert!(!cfg.copy_first_command_enabled());
+}
+
+#[test]
+#[serial]
+fn qq_init_can_enable_auto_copy_flag() {
+    // Select default profile, skip API key, decline history, enable auto-copy.
+    let cfg = run_qq_init("\n\nn\ny\n");
+    assert!(!cfg.history_enabled());
+    assert!(cfg.copy_first_command_enabled());
+}
