@@ -11,7 +11,7 @@ The two binaries are:
 - `qq` - ask a single question, e.g. "qq how can I recursively list all files in this directory" (qq stands for "quick question")
 - `qa` - a single step agent that can optionally use tools to finish a task: read a file, write a file, or execute a command with confirmation (qa stands for "quick agent")
 
-By default the repo includes profiles for OpenAI, Groq, Anthropic, and a local Ollama runtime.
+By default the repo includes profiles for OpenAI, Groq, and a local Ollama runtime. An Anthropic profile stub exists in the config for future work but is not wired up yet.
 
 
 
@@ -85,8 +85,9 @@ The initializer lets you choose the default provider:
 
 - Groq + `openai/gpt-oss-20b` (faster, cheaper)
 - OpenAI + `gpt-5-mini` (slower, a bit smarter)
-- Anthropic + `claude-3-5-sonnet-20241022` (Claude agent)
-- Ollama + `llama3.1` (runs locally at `http://127.0.0.1:11434/v1`)
+- Ollama (runs locally, adjust port if needed)
+
+> Anthropic support will return once the client speaks their Messages API; for now the initializer only offers OpenAI-compatible providers.
 
 It also offers to store an API key in the config (optional). If you prefer environment variables, leave it blank and set one of:
 
@@ -99,13 +100,13 @@ Defaults written to `~/.qq/config.json`:
 - Providers
   - `openai` → base `https://api.openai.com/v1`, env `OPENAI_API_KEY`
   - `groq` → base `https://api.groq.com/openai/v1`, env `GROQ_API_KEY`
-  - `anthropic` → base `https://api.anthropic.com/v1`, env `ANTHROPIC_API_KEY`
   - `ollama` → base `http://127.0.0.1:11434/v1`, env `OLLAMA_API_KEY` (qqqa auto-injects a non-empty placeholder if you leave it unset)
+  - `anthropic` → base `https://api.anthropic.com/v1`, env `ANTHROPIC_API_KEY` (present in the config schema for future support; not usable yet)
 - Profiles
   - `openai` → model `gpt-5-mini`
   - `groq` → model `openai/gpt-oss-20b` (default)
-  - `anthropic` → model `claude-3-5-sonnet-20241022`
   - `ollama` → model `llama3.1`
+  - `anthropic` → model `claude-3-5-sonnet-20241022` (inactive placeholder until Anthropic integration lands)
 - Optional per-profile `reasoning_effort` for GPT-5 family models. If you leave it unset, qqqa sends `"reasoning_effort": "minimal"` for any `gpt-5*` model to keep responses fast. Set it to `"low"`, `"medium"`, or `"high"` when you want deeper reasoning.
 
 Example override in `~/.qq/config.json`:
