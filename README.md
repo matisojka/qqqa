@@ -38,12 +38,6 @@ The tools may include transient context you choose to provide:
 - `qq` can include the last few terminal commands as hints and piped stdin if present.
 - `qa` can read files or run a specific command, but only once per invocation and with safety checks.
 
-## Why we recommend using OpenRouter by default
-
-OpenRouter mirrors the OpenAI Chat Completions API, adds generous community-hosted models, and keeps `openai/gpt-4.1-nano` fast and inexpensive. We configure qqqa to talk to `https://openrouter.ai/api/v1` out of the box, inject the required `HTTP-Referer`/`X-Title` headers, and read the API key from `OPENROUTER_API_KEY`, so your first run works as soon as you drop in a key.
-
-If you need even more throughput, the bundled `groq` profile that targets `openai/gpt-oss-20b` remains available, and you can still add any OpenAI-compatible provider by editing `~/.qq/config.json` or creating a new profile.
-
 ## Features
 
 - OpenAI compatible API client with streaming and non streaming calls.
