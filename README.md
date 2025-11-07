@@ -11,7 +11,7 @@ The two binaries are:
 - `qq` - ask a single question, e.g. "qq how can I recursively list all files in this directory" (qq stands for "quick question")
 - `qa` - a single step agent that can optionally use tools to finish a task: read a file, write a file, or execute a command with confirmation (qa stands for "quick agent")
 
-By default the repo includes profiles for OpenAI and Groq.
+By default the repo includes profiles for OpenAI, Groq, Anthropic, and a local Ollama runtime.
 
 
 
@@ -42,7 +42,7 @@ The tools may include transient context you choose to provide:
 
 For fast feedback loops, speed and cost matter. The included `groq` profile targets Groq's OpenAI compatible API and the model `openai/gpt-oss-20b`. We recommend Groq for really fast inference speed at roughly 1000 tokens per second and at a low price point compared to many alternatives. Set `GROQ_API_KEY` and you are ready to go.
 
-You can still use OpenAI or any other OpenAI compatible provider by adding a provider entry and a profile in `~/.qq/config.json`.
+You can still use any OpenAI compatible provider by adding a provider entry and a profile in `~/.qq/config.json`.
 
 ## Features
 
@@ -85,20 +85,27 @@ The initializer lets you choose the default provider:
 
 - Groq + `openai/gpt-oss-20b` (faster, cheaper)
 - OpenAI + `gpt-5-mini` (slower, a bit smarter)
+- Anthropic + `claude-3-5-sonnet-20241022` (Claude agent)
+- Ollama + `llama3.1` (runs locally at `http://127.0.0.1:11434/v1`)
 
 It also offers to store an API key in the config (optional). If you prefer environment variables, leave it blank and set one of:
 
 - `GROQ_API_KEY` for Groq
 - `OPENAI_API_KEY` for OpenAI
+- `OLLAMA_API_KEY` (optional; any non-empty string works—even `local`—because the Authorization header cannot be blank)
 
 Defaults written to `~/.qq/config.json`:
 
 - Providers
   - `openai` → base `https://api.openai.com/v1`, env `OPENAI_API_KEY`
   - `groq` → base `https://api.groq.com/openai/v1`, env `GROQ_API_KEY`
+  - `anthropic` → base `https://api.anthropic.com/v1`, env `ANTHROPIC_API_KEY`
+  - `ollama` → base `http://127.0.0.1:11434/v1`, env `OLLAMA_API_KEY` (qqqa auto-injects a non-empty placeholder if you leave it unset)
 - Profiles
   - `openai` → model `gpt-5-mini`
   - `groq` → model `openai/gpt-oss-20b` (default)
+  - `anthropic` → model `claude-3-5-sonnet-20241022`
+  - `ollama` → model `llama3.1`
 - Optional per-profile `reasoning_effort` for GPT-5 family models. If you leave it unset, qqqa sends `"reasoning_effort": "minimal"` for any `gpt-5*` model to keep responses fast. Set it to `"low"`, `"medium"`, or `"high"` when you want deeper reasoning.
 
 Example override in `~/.qq/config.json`:
@@ -118,6 +125,19 @@ Example override in `~/.qq/config.json`:
 - Optional flag: `no_emoji` (unset by default). Set via `qq --no-fun` or `qa --no-fun`.
 
 Terminal history is **off by default**. During `qq --init` / `qa --init` you can opt in to sending the last 10 `qq`/`qa` commands along with each request. You can still override per run with `--history` (force on) or `-n/--no-history` (force off). Only commands whose first token is `qq` or `qa` are ever shared.
+
+### Local models & custom ports
+
+Pick the built-in `ollama` profile (or create your own) to talk to a local runtime. Override the API base when you expose the service on a different host/port:
+
+```sh
+qq --profile ollama --api-base http://127.0.0.1:11435/v1 "summarize build failures"
+qa --profile ollama --api-base http://192.168.1.50:9000/v1 "apply the diff" -y
+```
+
+`qa --init` offers Ollama as an option and skips the API key warning; qqqa still sends a placeholder bearer token so OpenAI-compatible middleware keeps working. If you bypass the init flow and edit `config.json` manually, set either `"api_key": "local"` under the `ollama` provider or export `OLLAMA_API_KEY=local` so the Authorization header remains non-empty.
+
+> Example local setup: LM Studio on macOS driving `ollama run meta-llama-3.1-8b-instruct-hf` (Q4_K_M) on a MacBook Air M4/32 GB works fine, just slower than the Groq profile. Adjust the model tag in your `ollama` profile accordingly.
 
 You can still override at runtime:
 
