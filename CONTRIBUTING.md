@@ -53,7 +53,7 @@ TARGETS="x86_64-apple-darwin aarch64-apple-darwin" scripts/release.sh v0.9.1
 
 What the script does
 - Bumps `Cargo.toml` version to the provided one (normalizes to SemVer).
-- Builds `qq` and `qa` for macOS (x86_64/arm64) and Linux MUSL (x86_64/arm64) by default; override `TARGETS` if needed.
+- Builds `qq` and `qa` for macOS (x86_64/arm64), Linux MUSL (x86_64/arm64), and Windows (x86_64 GNU + arm64 gnullvm) by default; override `TARGETS` if needed.
 - Packages `qqqa-v<version>-<target>.tar.gz` under `target/releases/v<version>/` with README and LICENSE.
 - Writes `target/releases/v<version>/manifest.json` for upload to GitHub Releases.
 - Downloads the GitHub tag archive (`https://github.com/iagooar/qqqa/archive/refs/tags/v<version>.tar.gz`), computes its SHA256, and rewrites `homebrew-tap/Formula/qqqa.rb` with the new URL/sha/version so the tap is always aligned.
@@ -63,6 +63,7 @@ What the script does
 Notes
 - Cross-compiling across OSes may require appropriate toolchains. The script runs `rustup target add` for the listed targets.
 - For static Linux builds, switch to `*-unknown-linux-musl` targets if your environment supports them.
+- Windows artifacts use MSVC targets on Windows hosts. When cross-compiling from macOS/Linux, we ship the x86_64 build via MinGW-w64 (`x86_64-pc-windows-gnu`, requires `x86_64-w64-mingw32-gcc`) and the arm64 build via llvm-mingw (`aarch64-pc-windows-gnullvm`, requires `aarch64-w64-mingw32-clang`). Install the corresponding toolchains (Homebrew `mingw-w64` plus an `llvm-mingw` bundle) before running the release script.
 
 ## Code of Conduct
 

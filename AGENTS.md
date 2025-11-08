@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 - Source lives in `src/` with two binaries: `src/bin/qq.rs` and `src/bin/qa.rs`.
-- Core modules: `ai.rs`, `config.rs`, `prompt.rs`, `history.rs`, `perms.rs`, `formatting.rs`.
+- Core modules: `ai.rs`, `config.rs`, `prompt.rs`, `history.rs`, `perms.rs`, `formatting.rs`, `shell.rs`.
 - Tools for the agent live in `src/tools/` (`read_file.rs`, `write_file.rs`, `execute_command.rs`).
 - Integration tests live in `tests/`. Build artifacts are in `target/`.
 - Architecture notes: `src/lib.rs` re-exports the runtime modules and `src/tools/mod.rs` centralizes tool parsing/dispatch; refer to `README.md` for the high-level architecture and behavior overview.

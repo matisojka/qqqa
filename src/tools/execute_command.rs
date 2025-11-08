@@ -1,9 +1,11 @@
 use crate::perms::{CommandDisposition, ensure_safe_command};
+use crate::shell::ShellKind;
 use anyhow::{Context, Result, anyhow};
 use atty::Stream;
 use serde::Deserialize;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
+use std::process::Stdio;
 use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -37,6 +39,7 @@ pub async fn run(
     args: Args,
     auto_yes: bool,
     debug: bool,
+    shell: ShellKind,
     mut on_chunk: Option<&mut dyn for<'chunk> FnMut(StreamChunk<'chunk>)>,
 ) -> Result<String> {
     let cwd = args.cwd.as_deref().unwrap_or(".");
@@ -81,7 +84,7 @@ pub async fn run(
         }
     }
 
-    let child = spawn_child(&args.command, cwd, debug)?;
+    let child = spawn_child(&args.command, cwd, shell, debug)?;
 
     let mut stdout_buf: Vec<u8> = Vec::new();
     let mut stderr_buf: Vec<u8> = Vec::new();
@@ -217,7 +220,15 @@ impl KillSwitch {
     }
 }
 
-fn spawn_child(command: &str, cwd: &str, debug: bool) -> Result<ChildProcess> {
+fn spawn_child(command: &str, cwd: &str, shell: ShellKind, debug: bool) -> Result<ChildProcess> {
+    match shell {
+        ShellKind::Posix => spawn_posix_child(command, cwd, debug),
+        ShellKind::CmdExe => spawn_cmd_child(command, cwd),
+        ShellKind::PowerShell => spawn_powershell_child(command, cwd),
+    }
+}
+
+fn spawn_posix_child(command: &str, cwd: &str, debug: bool) -> Result<ChildProcess> {
     #[cfg(unix)]
     {
         if should_use_pty() {
@@ -234,13 +245,67 @@ fn spawn_child(command: &str, cwd: &str, debug: bool) -> Result<ChildProcess> {
 
     let mut cmd = Command::new("sh");
     cmd.arg("-lc").arg(command);
+    configure_stdio(&mut cmd, cwd);
+    let child = cmd.spawn().context("Failed to spawn command via sh")?;
+    Ok(ChildProcess::Plain(child))
+}
+
+fn spawn_cmd_child(command: &str, cwd: &str) -> Result<ChildProcess> {
+    #[cfg(windows)]
+    let program = "cmd.exe";
+    #[cfg(not(windows))]
+    let program = "cmd.exe";
+
+    let mut cmd = Command::new(program);
+    cmd.arg("/d").arg("/s").arg("/c").arg(command);
+    configure_stdio(&mut cmd, cwd);
+    let child = cmd
+        .spawn()
+        .with_context(|| format!("Failed to spawn {}", program))?;
+    Ok(ChildProcess::Plain(child))
+}
+
+fn spawn_powershell_child(command: &str, cwd: &str) -> Result<ChildProcess> {
+    #[cfg(windows)]
+    let candidates: &[&str] = &["pwsh.exe", "powershell.exe"];
+    #[cfg(not(windows))]
+    let candidates: &[&str] = &["pwsh", "powershell"]; // allow Windows shells if installed
+
+    let mut errors = Vec::new();
+    for prog in candidates {
+        let mut cmd = Command::new(prog);
+        cmd.arg("-NoLogo")
+            .arg("-NoProfile")
+            .arg("-Command")
+            .arg(command);
+        configure_stdio(&mut cmd, cwd);
+        match cmd.spawn() {
+            Ok(child) => return Ok(ChildProcess::Plain(child)),
+            Err(err) => errors.push(format!("{}: {}", prog, err)),
+        }
+    }
+
+    let tried = candidates.join(", ");
+    if errors.is_empty() {
+        Err(anyhow!(
+            "Failed to spawn PowerShell (no candidates found). Tried: {}",
+            tried
+        ))
+    } else {
+        Err(anyhow!(
+            "Failed to spawn PowerShell (tried {}): {}",
+            tried,
+            errors.join("; ")
+        ))
+    }
+}
+
+fn configure_stdio(cmd: &mut Command, cwd: &str) {
     cmd.current_dir(PathBuf::from(cwd));
     cmd.kill_on_drop(true);
-    cmd.stdin(std::process::Stdio::null());
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
-    let child = cmd.spawn().context("Failed to spawn command")?;
-    Ok(ChildProcess::Plain(child))
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
 }
 
 fn setup_stream_tasks(

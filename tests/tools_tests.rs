@@ -1,4 +1,5 @@
 use qqqa::perms::{clear_custom_allowlist, ensure_safe_path};
+use qqqa::shell::ShellKind;
 use qqqa::tools::parse_tool_call;
 use qqqa::tools::read_file;
 use qqqa::tools::write_file;
@@ -95,6 +96,7 @@ async fn execute_command_runs_and_captures_output() {
         },
         true,
         true,
+        ShellKind::Posix,
         None,
     )
     .await
@@ -121,6 +123,7 @@ async fn execute_command_honors_pty_force_flag() {
         },
         true,
         false,
+        ShellKind::Posix,
         None,
     )
     .await
@@ -137,6 +140,7 @@ async fn execute_command_honors_pty_force_flag() {
         },
         true,
         false,
+        ShellKind::Posix,
         None,
     )
     .await
@@ -174,6 +178,7 @@ async fn execute_command_respects_disable_flag() {
         },
         true,
         false,
+        ShellKind::Posix,
         None,
     )
     .await
@@ -191,6 +196,7 @@ async fn execute_command_respects_disable_flag() {
         },
         true,
         false,
+        ShellKind::Posix,
         None,
     )
     .await
@@ -231,6 +237,7 @@ async fn execute_command_streams_stdout_chunks() {
         },
         true,
         false,
+        ShellKind::Posix,
         Some(&mut printer),
     )
     .await
