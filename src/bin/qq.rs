@@ -170,6 +170,7 @@ async fn main() -> Result<()> {
         eff.base_url.clone(),
         eff.api_key.clone(),
         eff.headers.clone(),
+        eff.request_timeout_secs,
     )?
     .with_reasoning_effort(eff.reasoning_effort.clone());
 

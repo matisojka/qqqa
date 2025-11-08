@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 4000;
+const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 180;
+const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
 
 /// Minimal OpenAI-compatible chat streaming delta payload
 #[derive(Debug, Deserialize)]
@@ -99,11 +101,14 @@ impl ChatClient {
         base_url: String,
         api_key: String,
         headers: HashMap<String, String>,
+        request_timeout_secs: Option<u64>,
     ) -> Result<Self> {
         // Use rustls for TLS; set useful timeouts for robustness.
+        let timeout =
+            Duration::from_secs(request_timeout_secs.unwrap_or(DEFAULT_REQUEST_TIMEOUT_SECS));
         let client = Client::builder()
-            .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(10))
+            .timeout(timeout)
+            .connect_timeout(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS))
             .build()?;
         let mut default_headers = HeaderMap::new();
         for (name, value) in headers {
