@@ -33,6 +33,24 @@ pub struct ModelProvider {
     /// True when the provider targets a local runtime (no API key required).
     #[serde(default)]
     pub local: bool,
+    /// Optional TLS customization per provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls: Option<ProviderTlsConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProviderTlsConfig {
+    /// Path to a PEM/DER CA bundle. Relative paths are resolved against ~/.qq/.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca_bundle_path: Option<PathBuf>,
+    /// Optional env var name whose value points to the bundle path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca_bundle_env: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedTlsConfig {
+    pub ca_bundle_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +95,7 @@ impl Default for Config {
                 env_key: "OPENAI_API_KEY".to_string(),
                 api_key: None,
                 local: false,
+                tls: None,
             },
         );
         model_providers.insert(
@@ -87,6 +106,7 @@ impl Default for Config {
                 env_key: "OPENROUTER_API_KEY".to_string(),
                 api_key: None,
                 local: false,
+                tls: None,
             },
         );
         model_providers.insert(
@@ -97,6 +117,7 @@ impl Default for Config {
                 env_key: "GROQ_API_KEY".to_string(),
                 api_key: None,
                 local: false,
+                tls: None,
             },
         );
         model_providers.insert(
@@ -107,6 +128,7 @@ impl Default for Config {
                 env_key: "ANTHROPIC_API_KEY".to_string(),
                 api_key: None,
                 local: false,
+                tls: None,
             },
         );
         model_providers.insert(
@@ -117,6 +139,7 @@ impl Default for Config {
                 env_key: "OLLAMA_API_KEY".to_string(),
                 api_key: None,
                 local: true,
+                tls: None,
             },
         );
 
@@ -190,6 +213,7 @@ pub struct EffectiveProfile {
     pub request_timeout_secs: Option<u64>,
     pub is_local: bool,
     pub headers: HashMap<String, String>,
+    pub tls: Option<ResolvedTlsConfig>,
 }
 
 impl Config {
@@ -284,6 +308,7 @@ impl Config {
         &self,
         profile_opt: Option<&str>,
         model_override: Option<&str>,
+        config_dir: Option<&Path>,
     ) -> Result<EffectiveProfile> {
         let profile_name = profile_opt.unwrap_or(&self.default_profile);
         let profile = self
@@ -339,6 +364,12 @@ impl Config {
         } else {
             None
         };
+        let tls = provider
+            .tls
+            .as_ref()
+            .map(|cfg| cfg.resolve(config_dir))
+            .transpose()?
+            .flatten();
 
         Ok(EffectiveProfile {
             provider_key: provider_key.clone(),
@@ -349,6 +380,7 @@ impl Config {
             request_timeout_secs,
             is_local: provider.local,
             headers,
+            tls,
         })
     }
 
@@ -498,6 +530,51 @@ impl Config {
     }
 }
 
+impl ProviderTlsConfig {
+    pub fn resolve(&self, config_dir: Option<&Path>) -> Result<Option<ResolvedTlsConfig>> {
+        let env_path = match self.ca_bundle_env.as_deref() {
+            Some(key) if key.trim().is_empty() => {
+                return Err(anyhow!("TLS config ca_bundle_env cannot be empty"));
+            }
+            Some(key) => match std::env::var(key) {
+                Ok(value) => {
+                    if value.trim().is_empty() {
+                        return Err(anyhow!(
+                            "Environment variable '{}' for TLS CA bundle is empty",
+                            key
+                        ));
+                    }
+                    Some(PathBuf::from(value))
+                }
+                Err(std::env::VarError::NotPresent) => None,
+                Err(err) => {
+                    return Err(anyhow!(
+                        "Failed to read environment variable '{}': {}",
+                        key,
+                        err
+                    ));
+                }
+            },
+            None => None,
+        };
+
+        let chosen = env_path.or_else(|| self.ca_bundle_path.clone());
+        let Some(path) = chosen else {
+            return Ok(None);
+        };
+
+        let resolved = if path.is_absolute() || config_dir.is_none() {
+            path
+        } else {
+            config_dir.unwrap().join(path)
+        };
+
+        Ok(Some(ResolvedTlsConfig {
+            ca_bundle_path: resolved,
+        }))
+    }
+}
+
 fn provider_default_headers(provider_key: &str) -> HashMap<String, String> {
     match provider_key {
         "openrouter" => {
@@ -510,6 +587,51 @@ fn provider_default_headers(provider_key: &str) -> HashMap<String, String> {
             headers
         }
         _ => HashMap::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn tls_config_resolves_relative_path_against_config_dir() {
+        let dir = tempdir().unwrap();
+        let tls = ProviderTlsConfig {
+            ca_bundle_path: Some(PathBuf::from("certs/litellm-ca.pem")),
+            ca_bundle_env: None,
+        };
+        let resolved = tls
+            .resolve(Some(dir.path()))
+            .expect("resolution succeeds")
+            .expect("path present");
+        assert_eq!(
+            resolved.ca_bundle_path,
+            dir.path().join("certs/litellm-ca.pem")
+        );
+    }
+
+    #[test]
+    fn tls_config_prefers_env_value_when_present() {
+        let key = "QQQA_TEST_TLS_ENV";
+        let dir = tempdir().unwrap();
+        let env_path = dir.path().join("env-ca.pem");
+        unsafe {
+            std::env::set_var(key, env_path.to_string_lossy().to_string());
+        }
+        let tls = ProviderTlsConfig {
+            ca_bundle_path: Some(PathBuf::from("ignored.pem")),
+            ca_bundle_env: Some(key.to_string()),
+        };
+        let resolved = tls
+            .resolve(None)
+            .expect("resolution succeeds")
+            .expect("env value present");
+        assert_eq!(resolved.ca_bundle_path, env_path);
+        unsafe {
+            std::env::remove_var(key);
+        }
     }
 }
 

@@ -25,7 +25,8 @@ async fn chat_once_non_streaming_parses_response() {
             .body(r#"{"choices":[{"message":{"content":"Hello world"}}]}"#);
     });
 
-    let client = ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None).unwrap();
+    let client =
+        ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None, None).unwrap();
     let got = client.chat_once("model-x", "Hi", true).await.unwrap();
     assert_eq!(got, "Hello world");
     mock.assert();
@@ -50,7 +51,8 @@ async fn chat_stream_streams_tokens() {
             .body(sse_body);
     });
 
-    let client = ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None).unwrap();
+    let client =
+        ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None, None).unwrap();
     let mut acc = String::new();
     client
         .chat_stream("model-x", "Hi", true, |tok| acc.push_str(tok))
@@ -91,7 +93,8 @@ async fn chat_once_uses_new_parameters_for_new_models() {
             .body(r#"{"choices":[{"message":{"content":"ok"}}]}"#);
     });
 
-    let client = ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None).unwrap();
+    let client =
+        ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None, None).unwrap();
     let got = client.chat_once("gpt-5-mini", "Hi", false).await.unwrap();
     assert_eq!(got, "ok");
     mock.assert();
@@ -131,7 +134,8 @@ async fn chat_once_uses_legacy_parameters_for_old_models() {
             .body(r#"{"choices":[{"message":{"content":"ok"}}]}"#);
     });
 
-    let client = ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None).unwrap();
+    let client =
+        ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None, None).unwrap();
     let got = client.chat_once("gpt-4.1-mini", "Hi", false).await.unwrap();
     assert_eq!(got, "ok");
     mock.assert();
@@ -165,7 +169,7 @@ async fn chat_once_respects_reasoning_override_when_configured() {
             .body(r#"{"choices":[{"message":{"content":"ok"}}]}"#);
     });
 
-    let client = ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None)
+    let client = ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None, None)
         .unwrap()
         .with_reasoning_effort(Some("high".to_string()));
     let got = client.chat_once("gpt-5-mini", "Hi", false).await.unwrap();
@@ -197,7 +201,8 @@ async fn chat_client_sends_custom_headers() {
     );
     headers.insert("X-Title".to_string(), "qqqa".to_string());
 
-    let client = ChatClient::new(server.base_url(), "test".into(), headers, None).unwrap();
+    let client =
+        ChatClient::new(server.base_url(), "test".into(), headers, None, None).unwrap();
     let got = client.chat_once("model-x", "Hi", false).await.unwrap();
     assert_eq!(got, "ok");
     mock.assert();
@@ -218,7 +223,8 @@ async fn chat_client_respects_timeout_override() {
             .body(r#"{"choices":[{"message":{"content":"too slow"}}]}"#);
     });
 
-    let client = ChatClient::new(server.base_url(), "test".into(), HashMap::new(), Some(1)).unwrap();
+    let client =
+        ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None, Some(1)).unwrap();
     let start = Instant::now();
     let err = client.chat_once("model-x", "Hi", false).await.unwrap_err();
     let elapsed = start.elapsed();

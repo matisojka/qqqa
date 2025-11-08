@@ -142,7 +142,8 @@ async fn main() -> Result<()> {
     } = prepared;
 
     // Load config and resolve profile/model.
-    let (cfg, _path) = Config::load_or_init(cli.debug)?;
+    let (cfg, cfg_path) = Config::load_or_init(cli.debug)?;
+    let cfg_dir = cfg_path.parent();
     let copy_enabled = if cli.copy_command {
         true
     } else if cli.no_copy_command {
@@ -150,7 +151,7 @@ async fn main() -> Result<()> {
     } else {
         cfg.copy_first_command_enabled()
     };
-    let mut eff = match cfg.resolve_profile(cli.profile.as_deref(), cli.model.as_deref()) {
+    let mut eff = match cfg.resolve_profile(cli.profile.as_deref(), cli.model.as_deref(), cfg_dir) {
         Ok(eff) => eff,
         Err(e) => {
             let msg = e.to_string();
@@ -204,6 +205,7 @@ async fn main() -> Result<()> {
         eff.base_url.clone(),
         eff.api_key.clone(),
         eff.headers.clone(),
+        eff.tls.as_ref(),
         eff.request_timeout_secs,
     )?
     .with_reasoning_effort(eff.reasoning_effort.clone());
