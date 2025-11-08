@@ -43,7 +43,6 @@ The tools may include transient context you choose to provide:
 OpenRouter mirrors the OpenAI Chat Completions API, adds generous community-hosted models, and keeps `openai/gpt-4.1-nano` fast and inexpensive. qqqa talks to `https://openrouter.ai/api/v1` out of the box and reads the API key from `OPENROUTER_API_KEY`, so your first run works as soon as you drop in a key.
 
 If you need even more throughput, the bundled `groq` profile that targets `openai/gpt-oss-20b` and `openai/gpt-oss-120b` remains available, and you can still add any OpenAI-compatible provider by editing `~/.qq/config.json` or creating a new profile.
-
 ## Features
 
 - OpenAI compatible API client with streaming and non streaming calls.
@@ -111,6 +110,7 @@ Defaults written to `~/.qq/config.json`:
   - `ollama` → model `llama3.1`
   - `anthropic` → model `claude-3-5-sonnet-20241022` (inactive placeholder until Anthropic integration lands)
 - Optional per-profile `reasoning_effort` for GPT-5 family models. If you leave it unset, qqqa sends `"reasoning_effort": "minimal"` for any `gpt-5*` model to keep responses fast. Set it to `"low"`, `"medium"`, or `"high"` when you want deeper reasoning.
+- (discouraged): you can change the timeout, e.g. `"timeout": "240"` under a model profile in `~/.qq/config.json` to raise the per-request limit (`qq` + `qa` default to 180 s - this is SLOW; faster models are a better fix).
 
 Example override in `~/.qq/config.json`:
 
@@ -127,6 +127,7 @@ Example override in `~/.qq/config.json`:
 ```
 
 - Optional flag: `no_emoji` (unset by default). Set via `qq --no-fun` or `qa --no-fun`.
+- Optional auto-copy: `copy_first_command` (unset/false by default). Enable during `qq --init`, by running `qq --enable-auto-copy`, or by editing `~/.qq/config.json` so qq copies the first `<cmd>` block to your clipboard. Turn it off with `qq --disable-auto-copy`. Override per run with `--copy-command`/`--cc` or `--no-copy-command`/`--ncc` (also available as `-ncc`).
 
 ### Terminal history
 
@@ -161,6 +162,18 @@ qq --history "find large files in the last day"
 
 # disable emojis in responses (persists)
 qq --no-fun "summarize this"
+
+# auto-copy the first <cmd> block for fast pasting (alias: --cc)
+qq --copy-command "list docker images"
+
+# temporarily disable auto-copy even if enabled in config (alias: --ncc / -ncc)
+qq --no-copy-command "print working directory"
+
+# enable auto-copy for all future qq runs
+qq --enable-auto-copy
+
+# disable auto-copy persistently
+qq --disable-auto-copy
 ```
 
 Note: it is possible to run qq without quotes, which works most of the time the same way as with quotes.

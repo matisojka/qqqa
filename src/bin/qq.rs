@@ -1,10 +1,14 @@
 use anyhow::{Result, anyhow};
 use clap::{ArgAction, Parser};
 use qqqa::ai::{ChatClient, Msg};
+use qqqa::clipboard;
 use qqqa::config::{Config, InitExistsError};
-use qqqa::formatting::{print_assistant_text, print_stream_token, start_loading_animation};
+use qqqa::formatting::{
+    print_assistant_text, print_stream_token, render_xmlish_to_ansi, start_loading_animation,
+};
 use qqqa::history::read_recent_history;
 use qqqa::prompt::{build_qq_system_prompt, build_qq_user_message, coalesce_prompt_inputs};
+use std::ffi::OsString;
 use std::io::{Read, Stdin};
 
 /// qq — ask an LLM assistant a question
@@ -21,6 +25,14 @@ struct Cli {
     /// Disable emojis going forward (persists to config)
     #[arg(long = "no-fun", action = ArgAction::SetTrue)]
     no_fun: bool,
+
+    /// Persistently enable automatic copying of the first <cmd> block
+    #[arg(long = "enable-auto-copy", action = ArgAction::SetTrue, conflicts_with = "disable_auto_copy")]
+    enable_auto_copy: bool,
+
+    /// Persistently disable automatic copying of the first <cmd> block
+    #[arg(long = "disable-auto-copy", action = ArgAction::SetTrue, conflicts_with = "enable_auto_copy")]
+    disable_auto_copy: bool,
     /// Profile name from config to use
     #[arg(short = 'p', long = "profile")]
     profile: Option<String>,
@@ -44,6 +56,26 @@ struct Cli {
     #[arg(short = 's', long = "stream", action = ArgAction::SetTrue)]
     stream: bool,
 
+    /// Auto-copy the first recommended command for this run
+    #[arg(
+        long = "copy-command",
+        alias = "cc",
+        visible_alias = "cc",
+        action = ArgAction::SetTrue,
+        conflicts_with = "no_copy_command"
+    )]
+    copy_command: bool,
+
+    /// Disable auto-copying for this run (alias: --ncc, -ncc)
+    #[arg(
+        long = "no-copy-command",
+        alias = "ncc",
+        visible_alias = "ncc",
+        action = ArgAction::SetTrue,
+        conflicts_with = "copy_command"
+    )]
+    no_copy_command: bool,
+
     /// Print raw text (no formatting)
     #[arg(short = 'r', long = "raw", action = ArgAction::SetTrue)]
     raw: bool,
@@ -59,7 +91,7 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(normalized_cli_args());
 
     // Run interactive init if requested.
     if cli.init {
@@ -82,17 +114,9 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Apply persistent emoji-disable if requested.
-    if cli.no_fun {
-        let (mut cfg, path) = Config::load_or_init(cli.debug)?;
-        cfg.no_emoji = Some("true".to_string());
-        cfg.save(&path, cli.debug)?;
-        if cli.debug {
-            eprintln!(
-                "[debug] Disabled emojis in system prompt (persisted at {}).",
-                path.display()
-            );
-        }
+    let config_flags_requested = cli.no_fun || cli.enable_auto_copy || cli.disable_auto_copy;
+    if config_flags_requested {
+        persist_config_flags(&cli)?;
     }
 
     // Detect piped stdin and read it if present.
@@ -105,6 +129,9 @@ async fn main() -> Result<()> {
 
     let prepared = coalesce_prompt_inputs(cli.question.join(" "), stdin_block);
     if prepared.question.trim().is_empty() {
+        if config_flags_requested {
+            return Ok(());
+        }
         return Err(anyhow!(
             "No input provided. Pass a question or pipe stdin (e.g., `ls -la | qq explain`)."
         ));
@@ -117,6 +144,13 @@ async fn main() -> Result<()> {
     // Load config and resolve profile/model.
     let (cfg, cfg_path) = Config::load_or_init(cli.debug)?;
     let cfg_dir = cfg_path.parent();
+    let copy_enabled = if cli.copy_command {
+        true
+    } else if cli.no_copy_command {
+        false
+    } else {
+        cfg.copy_first_command_enabled()
+    };
     let mut eff = match cfg.resolve_profile(cli.profile.as_deref(), cli.model.as_deref(), cfg_dir) {
         Ok(eff) => eff,
         Err(e) => {
@@ -172,6 +206,7 @@ async fn main() -> Result<()> {
         eff.api_key.clone(),
         eff.headers.clone(),
         eff.tls.as_ref(),
+        eff.request_timeout_secs,
     )?
     .with_reasoning_effort(eff.reasoning_effort.clone());
 
@@ -191,14 +226,16 @@ async fn main() -> Result<()> {
                     content: &user,
                 },
             ];
+            let mut raw_buffer = String::new();
             client
                 .chat_stream_messages(&eff.model, &msgs, cli.debug, |tok| {
+                    raw_buffer.push_str(tok);
                     print_stream_token(tok);
                 })
                 .await?;
             println!();
+            maybe_copy_first_command(&raw_buffer, copy_enabled, cli.raw, cli.debug);
         } else {
-            use qqqa::formatting::render_xmlish_to_ansi;
             let msgs = [
                 Msg {
                     role: "system",
@@ -221,6 +258,7 @@ async fn main() -> Result<()> {
             // One empty line before the first line of the answer
             println!("");
             println!("{}", compacted.trim_end());
+            maybe_copy_first_command(&buf, copy_enabled, cli.raw, cli.debug);
         }
     } else {
         let loading = start_loading_animation();
@@ -242,6 +280,7 @@ async fn main() -> Result<()> {
         // One empty line before the first line of the answer
         println!("");
         print_assistant_text(&full, cli.raw);
+        maybe_copy_first_command(&full, copy_enabled, cli.raw, cli.debug);
     }
 
     Ok(())
@@ -253,4 +292,150 @@ fn read_all_stdin(mut stdin: Stdin) -> Result<String> {
     let mut buf = String::new();
     stdin.read_to_string(&mut buf)?;
     Ok(buf)
+}
+
+fn normalized_cli_args() -> Vec<OsString> {
+    normalize_ncc(std::env::args_os())
+}
+
+fn normalize_ncc<I>(args: I) -> Vec<OsString>
+where
+    I: IntoIterator<Item = OsString>,
+{
+    args.into_iter()
+        .enumerate()
+        .map(|(idx, arg)| {
+            if idx > 0 && arg == OsString::from("-ncc") {
+                OsString::from("--ncc")
+            } else {
+                arg
+            }
+        })
+        .collect()
+}
+
+fn maybe_copy_first_command(text: &str, enabled: bool, raw_output: bool, debug: bool) {
+    if !enabled {
+        return;
+    }
+    let Some(command) = extract_first_command(text) else {
+        if debug {
+            eprintln!("[debug] No <cmd> block found to copy.");
+        }
+        return;
+    };
+    match clipboard::copy_to_clipboard(&command) {
+        Ok(()) => print_copy_notice(raw_output),
+        Err(err) => {
+            eprintln!("Failed to copy first command to clipboard: {}", err);
+        }
+    }
+}
+
+fn extract_first_command(text: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    let start = lower.find("<cmd>")?;
+    let after_start = start + 5;
+    let closing_rel = lower[after_start..].find("</cmd>")?;
+    let end = after_start + closing_rel;
+    let raw = &text[after_start..end];
+    let normalized = raw
+        .replace("<br/>", "\n")
+        .replace("<br />", "\n")
+        .replace("<br>", "\n");
+    let unescaped = unescape_entities(&normalized);
+    let trimmed = unescaped.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn unescape_entities(input: &str) -> String {
+    input
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
+fn print_copy_notice(raw_output: bool) {
+    println!("");
+    if raw_output {
+        println!("<info>Copied first command to clipboard</info>");
+    } else {
+        println!(
+            "{}",
+            render_xmlish_to_ansi("<info>Copied first command to clipboard</info>")
+        );
+    }
+}
+
+fn persist_config_flags(cli: &Cli) -> Result<()> {
+    let (mut cfg, path) = Config::load_or_init(cli.debug)?;
+    let mut changed = false;
+
+    if cli.no_fun {
+        let desired = Some("true".to_string());
+        if cfg.no_emoji != desired {
+            cfg.no_emoji = desired;
+            changed = true;
+        }
+        if cli.debug {
+            eprintln!(
+                "[debug] Disabled emojis in system prompt (persisted at {}).",
+                path.display()
+            );
+        }
+    }
+
+    if cli.enable_auto_copy {
+        if !cfg.copy_first_command_enabled() {
+            cfg.set_copy_first_command(true);
+            changed = true;
+        }
+        println!("Auto-copy first command: enabled (persisted).");
+    }
+
+    if cli.disable_auto_copy {
+        if cfg.copy_first_command_enabled() {
+            cfg.set_copy_first_command(false);
+            changed = true;
+        }
+        println!("Auto-copy first command: disabled (persisted).");
+    }
+
+    if changed {
+        cfg.save(&path, cli.debug)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_first_command_unescapes_entities_and_br() {
+        let input = "<cmd>echo foo&amp;&lt;bar&gt;<br/>ls</cmd><cmd>pwd</cmd>";
+        let extracted = extract_first_command(input).expect("should find command");
+        assert_eq!(extracted, "echo foo&<bar>\nls");
+    }
+
+    #[test]
+    fn extract_first_command_returns_none_when_missing() {
+        assert!(extract_first_command("<info>No commands here</info>").is_none());
+    }
+
+    #[test]
+    fn normalize_ncc_rewrites_short_flag() {
+        let args = vec![
+            OsString::from("qq"),
+            OsString::from("-ncc"),
+            OsString::from("status"),
+        ];
+        let normalized = normalize_ncc(args);
+        assert_eq!(normalized[1], OsString::from("--ncc"));
+    }
 }

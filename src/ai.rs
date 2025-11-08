@@ -14,6 +14,8 @@ use std::path::Path;
 use std::time::Duration;
 
 const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 4000;
+const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 180;
+const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
 
 /// Minimal OpenAI-compatible chat streaming delta payload
 #[derive(Debug, Deserialize)]
@@ -105,11 +107,14 @@ impl ChatClient {
         api_key: String,
         headers: HashMap<String, String>,
         tls: Option<&ResolvedTlsConfig>,
+        request_timeout_secs: Option<u64>,
     ) -> Result<Self> {
         // Use rustls for TLS; set useful timeouts for robustness.
+        let timeout =
+            Duration::from_secs(request_timeout_secs.unwrap_or(DEFAULT_REQUEST_TIMEOUT_SECS));
         let mut builder = Client::builder()
-            .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(10));
+            .timeout(timeout)
+            .connect_timeout(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS));
         if let Some(tls_cfg) = tls {
             for cert in load_root_certificates(&tls_cfg.ca_bundle_path)? {
                 builder = builder.add_root_certificate(cert);
