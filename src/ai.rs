@@ -1,11 +1,16 @@
+use crate::config::ResolvedTlsConfig;
 use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
+use fs_err as fs;
 use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use reqwest::{Client, RequestBuilder};
+use reqwest::{Certificate, Client, RequestBuilder};
+use rustls_pemfile::certs;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::io::Cursor;
+use std::path::Path;
 use std::time::Duration;
 
 const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 4000;
@@ -99,12 +104,18 @@ impl ChatClient {
         base_url: String,
         api_key: String,
         headers: HashMap<String, String>,
+        tls: Option<&ResolvedTlsConfig>,
     ) -> Result<Self> {
         // Use rustls for TLS; set useful timeouts for robustness.
-        let client = Client::builder()
+        let mut builder = Client::builder()
             .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(10))
-            .build()?;
+            .connect_timeout(Duration::from_secs(10));
+        if let Some(tls_cfg) = tls {
+            for cert in load_root_certificates(&tls_cfg.ca_bundle_path)? {
+                builder = builder.add_root_certificate(cert);
+            }
+        }
+        let client = builder.build()?;
         let mut default_headers = HeaderMap::new();
         for (name, value) in headers {
             let header_name = HeaderName::from_bytes(name.as_bytes())
@@ -473,6 +484,32 @@ impl ChatClient {
     }
 }
 
+fn load_root_certificates(path: &Path) -> Result<Vec<Certificate>> {
+    let data = fs::read(path)
+        .with_context(|| format!("Reading TLS certificate(s) at {}", path.display()))?;
+    let mut cursor = Cursor::new(&data);
+    let mut parsed = Vec::new();
+    for pem in certs(&mut cursor) {
+        let der =
+            pem.with_context(|| format!("Parsing PEM certificate from {}", path.display()))?;
+        parsed.push(
+            Certificate::from_der(der.as_ref())
+                .with_context(|| format!("Parsing PEM certificate from {}", path.display()))?,
+        );
+    }
+    if !parsed.is_empty() {
+        return Ok(parsed);
+    }
+
+    if let Ok(cert) = Certificate::from_pem(&data) {
+        return Ok(vec![cert]);
+    }
+
+    let cert = Certificate::from_der(&data)
+        .with_context(|| format!("Parsing DER certificate from {}", path.display()))?;
+    Ok(vec![cert])
+}
+
 /// Minimal typed message for multi-message calls.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Msg<'a> {
@@ -487,4 +524,39 @@ fn find_double_newline(buf: &[u8]) -> Option<usize> {
 
 fn find_single_newline(buf: &[u8]) -> Option<usize> {
     buf.iter().position(|&b| b == b'\n')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_root_certificates;
+    use rcgen::{CertifiedKey, generate_simple_self_signed};
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn load_root_certificates_supports_multiple_pem_entries() {
+        let bundle_dir = tempdir().unwrap();
+        let CertifiedKey { cert: cert_a, .. } =
+            generate_simple_self_signed(["a.lan".into()]).unwrap();
+        let CertifiedKey { cert: cert_b, .. } =
+            generate_simple_self_signed(["b.lan".into()]).unwrap();
+        let pem = format!("{}\n{}", cert_a.pem(), cert_b.pem());
+        let path = bundle_dir.path().join("bundle.pem");
+        fs::write(&path, pem).unwrap();
+
+        let certs = load_root_certificates(&path).expect("certs load");
+        assert_eq!(certs.len(), 2);
+    }
+
+    #[test]
+    fn load_root_certificates_handles_der_files() {
+        let dir = tempdir().unwrap();
+        let CertifiedKey { cert, .. } = generate_simple_self_signed(["der.test".into()]).unwrap();
+        let der = cert.der().as_ref().to_vec();
+        let path = dir.path().join("bundle.der");
+        fs::write(&path, der).unwrap();
+
+        let certs = load_root_certificates(&path).expect("certs load");
+        assert_eq!(certs.len(), 1);
+    }
 }

@@ -44,7 +44,7 @@ fn local_provider_uses_placeholder_api_key_when_env_missing() {
     }
     let cfg = Config::default();
     let eff = cfg
-        .resolve_profile(Some("ollama"), None)
+        .resolve_profile(Some("ollama"), None, None)
         .expect("ollama profile should resolve");
     assert_eq!(eff.api_key, "qqqa-local-placeholder");
     assert!(eff.is_local);

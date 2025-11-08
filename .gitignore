@@ -24,3 +24,6 @@ Cargo.lock
 .idea/
 
 homebrew-tap/
+
+# Python cache directories
+__pycache__/

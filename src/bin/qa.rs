@@ -105,7 +105,8 @@ async fn main() -> Result<()> {
             );
         }
     }
-    let mut eff = match cfg.resolve_profile(cli.profile.as_deref(), cli.model.as_deref()) {
+    let cfg_dir = path.parent();
+    let mut eff = match cfg.resolve_profile(cli.profile.as_deref(), cli.model.as_deref(), cfg_dir) {
         Ok(eff) => eff,
         Err(e) => {
             let msg = e.to_string();
@@ -155,6 +156,7 @@ async fn main() -> Result<()> {
         eff.base_url.clone(),
         eff.api_key.clone(),
         eff.headers.clone(),
+        eff.tls.as_ref(),
     )?
     .with_reasoning_effort(eff.reasoning_effort.clone());
     // Provide tool specs so the API can emit structured tool_calls instead of erroring.

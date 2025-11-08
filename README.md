@@ -38,11 +38,11 @@ The tools may include transient context you choose to provide:
 - `qq` can include the last few terminal commands as hints and piped stdin if present.
 - `qa` can read files or run a specific command, but only once per invocation and with safety checks.
 
-## Why we recommend using OpenRouter by default
+## Why I recommend using OpenRouter by default
 
-OpenRouter mirrors the OpenAI Chat Completions API, adds generous community-hosted models, and keeps `openai/gpt-4.1-nano` fast and inexpensive. We configure qqqa to talk to `https://openrouter.ai/api/v1` out of the box, inject the required `HTTP-Referer`/`X-Title` headers, and read the API key from `OPENROUTER_API_KEY`, so your first run works as soon as you drop in a key.
+OpenRouter mirrors the OpenAI Chat Completions API, adds generous community-hosted models, and keeps `openai/gpt-4.1-nano` fast and inexpensive. qqqa talks to `https://openrouter.ai/api/v1` out of the box and reads the API key from `OPENROUTER_API_KEY`, so your first run works as soon as you drop in a key.
 
-If you need even more throughput, the bundled `groq` profile that targets `openai/gpt-oss-20b` remains available, and you can still add any OpenAI-compatible provider by editing `~/.qq/config.json` or creating a new profile.
+If you need even more throughput, the bundled `groq` profile that targets `openai/gpt-oss-20b` and `openai/gpt-oss-120b` remains available, and you can still add any OpenAI-compatible provider by editing `~/.qq/config.json` or creating a new profile.
 
 ## Features
 
@@ -128,30 +128,10 @@ Example override in `~/.qq/config.json`:
 
 - Optional flag: `no_emoji` (unset by default). Set via `qq --no-fun` or `qa --no-fun`.
 
+### Terminal history
+
 Terminal history is **off by default**. During `qq --init` / `qa --init` you can opt in to sending the last 10 `qq`/`qa` commands along with each request. You can still override per run with `--history` (force on) or `-n/--no-history` (force off). Only commands whose first token is `qq` or `qa` are ever shared.
 
-### Local models & custom ports
-
-Pick the built-in `ollama` profile (or create your own) to talk to a local runtime. Override the API base when you expose the service on a different host/port:
-
-```sh
-qq --profile ollama --api-base http://127.0.0.1:11435/v1 "summarize build failures"
-qa --profile ollama --api-base http://192.168.1.50:9000/v1 "apply the diff" -y
-```
-
-`qa --init` offers Ollama as an option and skips the API key warning; qqqa still sends a placeholder bearer token so OpenAI-compatible middleware keeps working. If you bypass the init flow and edit `config.json` manually, set either `"api_key": "local"` under the `ollama` provider or export `OLLAMA_API_KEY=local` so the Authorization header remains non-empty.
-
-> Example local setup: LM Studio on macOS driving `ollama run meta-llama-3.1-8b-instruct-hf` (Q4_K_M) on a MacBook Air M4/32 GB works fine, just slower than the hosted OpenRouter/Groq profiles. Adjust the model tag in your `ollama` profile accordingly.
-
-You can still override at runtime:
-
-```sh
-# choose profile
-qq -p groq "what is ripgrep"
-
-# override model for a single call
-qq -m openai/gpt-oss-20b "explain this awk one-liner"
-```
 
 ## Usage
 
@@ -261,6 +241,60 @@ When qa runs a command while stdout is a terminal, output now streams live; the 
 `execute_command` prints the proposed command and asks for confirmation. It warns if the working directory is outside your home. Use `-y` to auto approve in trusted workflows.
 
 The runner enforces a default allowlist (think `ls`, `grep`, `find`, `rg`, `awk`, etc.) and rejects pipelines, redirection, and other high-risk constructs. When a command is blocked, `qa` prompts you to add it to `command_allowlist` inside `~/.qq/config.json`; approving once persists the choice and updates future runs.
+
+## Advanced features and configurations
+
+### Custom TLS certificates (self-signed proxies)
+
+Some OpenAI-compatible gateways (LiteLLM, local corporate proxies, etc.) terminate TLS with a self-signed CA. Add a per-provider `tls` block so qqqa trusts that CA in addition to the default Rustls bundle:
+
+```json
+{
+  "model_providers": {
+    "litellm": {
+      "name": "LiteLLM",
+      "base_url": "https://proxy.local/v1",
+      "env_key": "LITELLM_API_KEY",
+      "tls": {
+        "ca_bundle_path": "certs/litellm-ca.pem",
+        "ca_bundle_env": "SSL_CERTFILE_PATH"
+      }
+    }
+  }
+}
+```
+
+- `ca_bundle_path` accepts a PEM or DER file. Relative paths are resolved against `~/.qq/` so you can keep certificates next to the config.
+- `ca_bundle_env` is optional; if set, qqqa reads that environment variable for the bundle path and falls back to `ca_bundle_path` when it is unset. This mirrors proxies that expose `SSL_CERTFILE_PATH` or similar knobs.
+- Multiple certificates can live in the same file (concatenate PEM entries). qqqa appends them to the existing Rustls trust store, so standard public CAs continue to work.
+
+With this configuration any provider—LiteLLM, Ollama over HTTPS, your company gateway, or another proxy—can authenticate with its custom CA without disabling TLS verification.
+
+
+
+### Local models & custom ports
+
+Pick the built-in `ollama` profile (or create your own) to talk to a local runtime. Override the API base when you expose the service on a different host/port:
+
+```sh
+qq --profile ollama --api-base http://127.0.0.1:11435/v1 "summarize build failures"
+qa --profile ollama --api-base http://192.168.1.50:9000/v1 "apply the diff" -y
+```
+
+`qa --init` offers Ollama as an option and skips the API key warning; qqqa still sends a placeholder bearer token so OpenAI-compatible middleware keeps working. If you bypass the init flow and edit `config.json` manually, set either `"api_key": "local"` under the `ollama` provider or export `OLLAMA_API_KEY=local` so the Authorization header remains non-empty.
+
+> Example local setup: LM Studio on macOS driving `ollama run meta-llama-3.1-8b-instruct-hf` (Q4_K_M) on a MacBook Air M4/32 GB works fine, just slower than the hosted OpenRouter/Groq profiles. Adjust the model tag in your `ollama` profile accordingly.
+
+You can still override at runtime:
+
+```sh
+# choose profile
+qq -p groq "what is ripgrep"
+
+# override model for a single call
+qq -m openai/gpt-oss-20b "explain this awk one-liner"
+```
+
 
 ## Safety model
 
