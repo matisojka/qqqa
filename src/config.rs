@@ -41,6 +41,9 @@ pub struct Profile {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// Optional per-profile request timeout override (seconds as string)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,6 +127,7 @@ impl Default for Config {
                 model_provider: "openrouter".to_string(),
                 model: "openai/gpt-4.1-nano".to_string(),
                 reasoning_effort: None,
+                timeout: None,
             },
         );
         profiles.insert(
@@ -132,6 +136,7 @@ impl Default for Config {
                 model_provider: "openai".to_string(),
                 model: "gpt-5-mini".to_string(),
                 reasoning_effort: None,
+                timeout: None,
             },
         );
         profiles.insert(
@@ -140,6 +145,7 @@ impl Default for Config {
                 model_provider: "groq".to_string(),
                 model: "openai/gpt-oss-20b".to_string(),
                 reasoning_effort: None,
+                timeout: None,
             },
         );
         profiles.insert(
@@ -148,6 +154,7 @@ impl Default for Config {
                 model_provider: "anthropic".to_string(),
                 model: "claude-3-5-sonnet-20241022".to_string(),
                 reasoning_effort: None,
+                timeout: None,
             },
         );
         profiles.insert(
@@ -156,6 +163,7 @@ impl Default for Config {
                 model_provider: "ollama".to_string(),
                 model: "llama3.1".to_string(),
                 reasoning_effort: None,
+                timeout: None,
             },
         );
 
@@ -179,6 +187,7 @@ pub struct EffectiveProfile {
     pub base_url: String,
     pub api_key: String,
     pub reasoning_effort: Option<String>,
+    pub request_timeout_secs: Option<u64>,
     pub is_local: bool,
     pub headers: HashMap<String, String>,
 }
@@ -307,12 +316,37 @@ impl Config {
             ));
         };
 
+        let request_timeout_secs = if let Some(raw) = profile.timeout.as_deref() {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                let secs = trimmed.parse::<u64>().with_context(|| {
+                    format!(
+                        "Invalid timeout '{}' for profile '{}': expected positive integer seconds",
+                        raw, profile_name
+                    )
+                })?;
+                if secs == 0 {
+                    return Err(anyhow!(
+                        "Invalid timeout '{}' for profile '{}': must be greater than zero",
+                        raw,
+                        profile_name
+                    ));
+                }
+                Some(secs)
+            }
+        } else {
+            None
+        };
+
         Ok(EffectiveProfile {
             provider_key: provider_key.clone(),
             model,
             base_url,
             api_key,
             reasoning_effort: profile.reasoning_effort.clone(),
+            request_timeout_secs,
             is_local: provider.local,
             headers,
         })
