@@ -4,12 +4,14 @@ use qqqa::ai::{ChatClient, Msg};
 use qqqa::clipboard;
 use qqqa::config::{Config, InitExistsError};
 use qqqa::formatting::{
-    print_assistant_text, print_stream_token, render_xmlish_to_ansi, start_loading_animation,
+    StreamingFormatter, print_assistant_text, print_stream_token, render_xmlish_to_ansi,
+    start_loading_animation,
 };
 use qqqa::history::read_recent_history;
 use qqqa::prompt::{build_qq_system_prompt, build_qq_user_message, coalesce_prompt_inputs};
 use qqqa::shell::{detect_shell, shell_hint_for_prompt};
 use std::ffi::OsString;
+use std::io::Write as _;
 use std::io::{Read, Stdin};
 
 /// qq — ask an LLM assistant a question
@@ -53,9 +55,9 @@ struct Cli {
     #[arg(long = "history", action = ArgAction::SetTrue, conflicts_with = "no_history")]
     history: bool,
 
-    /// Stream response tokens as they arrive
-    #[arg(short = 's', long = "stream", action = ArgAction::SetTrue)]
-    stream: bool,
+    /// Disable streaming and wait for the full response before printing
+    #[arg(long = "no-stream", action = ArgAction::SetTrue)]
+    no_stream: bool,
 
     /// Auto-copy the first recommended command for this run
     #[arg(
@@ -220,7 +222,7 @@ async fn main() -> Result<()> {
     .with_reasoning_effort(eff.reasoning_effort.clone());
 
     // Stream or buffered request per flag.
-    if cli.stream {
+    if !cli.no_stream {
         // If pretty output is desired, buffer tokens to render XML-ish after stream completes.
         if cli.raw {
             // One empty line before streamed raw output
@@ -256,17 +258,24 @@ async fn main() -> Result<()> {
                 },
             ];
             let mut buf = String::new();
+            let mut formatter = StreamingFormatter::new();
+            let mut writer = PrettyStreamWriter::new();
+            // One empty line before streamed formatted output
+            println!("");
             client
                 .chat_stream_messages(&eff.model, &msgs, cli.debug, |tok| {
                     buf.push_str(tok);
+                    if let Some(delta) = formatter.push(tok) {
+                        writer.write(&delta);
+                    }
                 })
                 .await?;
-            use qqqa::formatting::compact_blank_lines;
-            let rendered = render_xmlish_to_ansi(&buf);
-            let compacted = compact_blank_lines(&rendered);
-            // One empty line before the first line of the answer
+            if let Some(tail) = formatter.flush() {
+                if !tail.is_empty() {
+                    writer.write(&tail);
+                }
+            }
             println!("");
-            println!("{}", compacted.trim_end());
             maybe_copy_first_command(&buf, copy_enabled, cli.raw, cli.debug);
         }
     } else {
@@ -321,6 +330,47 @@ where
             }
         })
         .collect()
+}
+
+struct PrettyStreamWriter {
+    newline_run: usize,
+}
+
+impl PrettyStreamWriter {
+    fn new() -> Self {
+        Self { newline_run: 0 }
+    }
+
+    fn write(&mut self, text: &str) {
+        let filtered = self.filter(text);
+        if filtered.is_empty() {
+            return;
+        }
+        print!("{}", filtered);
+        let _ = std::io::stdout().flush();
+    }
+
+    fn filter(&mut self, text: &str) -> String {
+        let mut out = String::new();
+        for ch in text.chars() {
+            match ch {
+                '\r' => continue,
+                '\n' => {
+                    if self.newline_run < 2 {
+                        out.push('\n');
+                    }
+                    if self.newline_run < 2 {
+                        self.newline_run += 1;
+                    }
+                }
+                _ => {
+                    out.push(ch);
+                    self.newline_run = 0;
+                }
+            }
+        }
+        out
+    }
 }
 
 fn maybe_copy_first_command(text: &str, enabled: bool, raw_output: bool, debug: bool) {
@@ -446,5 +496,15 @@ mod tests {
         ];
         let normalized = normalize_ncc(args);
         assert_eq!(normalized[1], OsString::from("--ncc"));
+    }
+
+    #[test]
+    fn pretty_stream_writer_limits_blank_lines() {
+        let mut writer = PrettyStreamWriter::new();
+        let first = writer.filter("foo\n\n\nbar\r\n\n");
+        assert_eq!(first, "foo\n\nbar\n\n");
+        // Additional newlines without intervening text should be dropped.
+        let second = writer.filter("\n\n\nbaz");
+        assert_eq!(second, "baz");
     }
 }

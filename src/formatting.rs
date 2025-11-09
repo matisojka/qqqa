@@ -7,137 +7,243 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MarkupTag {
+    Bold,
+    Cmd,
+    Info,
+    File,
+    Warn,
+    Code,
+}
+
+fn style_for_stack(stack: &[MarkupTag]) -> Style {
+    let mut st = Style::new();
+    for t in stack {
+        match t {
+            MarkupTag::Bold => st = st.bold(),
+            MarkupTag::Cmd => st = st.fg(Color::Green),
+            MarkupTag::Info => st = st.fg(Color::Cyan),
+            MarkupTag::File => st = st.fg(Color::Magenta),
+            MarkupTag::Warn => st = st.fg(Color::Yellow),
+            MarkupTag::Code => st = st.fg(Color::Cyan),
+        }
+    }
+    st
+}
+
+fn unescape(input: &str) -> String {
+    input
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
+fn tag_from_name(name: &str) -> Option<MarkupTag> {
+    match name {
+        "bold" | "strong" | "b" => Some(MarkupTag::Bold),
+        "cmd" => Some(MarkupTag::Cmd),
+        "info" => Some(MarkupTag::Info),
+        "file" => Some(MarkupTag::File),
+        "warn" => Some(MarkupTag::Warn),
+        "code" => Some(MarkupTag::Code),
+        _ => None,
+    }
+}
+
+fn push_with_style(out: &mut String, text: &str, stack: &[MarkupTag]) {
+    if text.is_empty() {
+        return;
+    }
+    let text = unescape(text);
+    if text.is_empty() {
+        return;
+    }
+    if stack.is_empty() {
+        out.push_str(&text);
+    } else {
+        out.push_str(&style_for_stack(stack).paint(text).to_string());
+    }
+}
+
+fn split_emit_tail(text: &str) -> (&str, usize) {
+    if let Some(pos) = text.rfind('&') {
+        let tail = &text[pos..];
+        if !tail.contains(';') && tail.len() < 5 {
+            return (&text[..pos], text.len() - pos);
+        }
+    }
+    (text, 0)
+}
+
+#[derive(Default)]
+struct XmlishStreamingParser {
+    stack: Vec<MarkupTag>,
+    pending: String,
+}
+
+impl XmlishStreamingParser {
+    fn new() -> Self {
+        Self {
+            stack: Vec::new(),
+            pending: String::new(),
+        }
+    }
+
+    fn process(&mut self, chunk: &str, out: &mut String) {
+        if chunk.is_empty() {
+            return;
+        }
+        self.pending.push_str(chunk);
+        let mut processed = 0usize;
+        while processed < self.pending.len() {
+            let remaining = &self.pending[processed..];
+            if remaining.is_empty() {
+                break;
+            }
+            if let Some(rel) = remaining.find('<') {
+                let start = processed + rel;
+                if start > processed {
+                    let text = &self.pending[processed..start];
+                    push_with_style(out, text, &self.stack);
+                }
+                let after = &self.pending[start..];
+                if let Some(end_rel) = after.find('>') {
+                    let end = start + end_rel;
+                    let raw = self.pending[start + 1..end].trim().to_string();
+                    self.handle_tag(&raw, out);
+                    processed = end + 1;
+                } else {
+                    // Incomplete tag; keep from start onward for next chunk
+                    processed = start;
+                    break;
+                }
+            } else {
+                // No more tags, emit safe portion
+                let tail = &self.pending[processed..];
+                let (emit, tail_len) = split_emit_tail(tail);
+                push_with_style(out, emit, &self.stack);
+                processed = self.pending.len() - tail_len;
+                break;
+            }
+        }
+        self.pending.drain(..processed);
+    }
+
+    fn finish(&mut self, out: &mut String) {
+        if !self.pending.is_empty() {
+            push_with_style(out, &self.pending, &self.stack);
+            self.pending.clear();
+        }
+    }
+
+    fn handle_tag(&mut self, raw: &str, out: &mut String) {
+        if raw.is_empty() {
+            return;
+        }
+        let raw_trim = raw.trim();
+        let normalized = raw_trim.replace(' ', "");
+        let lowered = normalized.trim_end_matches('/').to_ascii_lowercase();
+        if lowered == "br" {
+            out.push('\n');
+            return;
+        }
+        if raw_trim.starts_with('/') {
+            let name = raw_trim[1..].trim().to_ascii_lowercase();
+            if let Some(tag) = tag_from_name(&name) {
+                if let Some(pos) = self.stack.iter().rposition(|t| *t == tag) {
+                    self.stack.remove(pos);
+                }
+            }
+            return;
+        }
+        if let Some(tag) = tag_from_name(&lowered) {
+            self.stack.push(tag);
+        }
+    }
+}
+
 /// Render our pseudo-XML to ANSI-colored text.
 /// Supported tags: <bold>, <cmd>, <info>, <file>, <warn>, <code>, <br/>
 pub fn render_xmlish_to_ansi(input: &str) -> String {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum Tag {
-        Bold,
-        Cmd,
-        Info,
-        File,
-        Warn,
-        Code,
-    }
-
-    fn style_for_stack(stack: &[Tag]) -> Style {
-        let mut st = Style::new();
-        for t in stack {
-            match t {
-                Tag::Bold => {
-                    st = st.bold();
-                }
-                Tag::Cmd => {
-                    st = st.fg(Color::Green);
-                }
-                Tag::Info => {
-                    st = st.fg(Color::Cyan);
-                }
-                Tag::File => {
-                    st = st.fg(Color::Magenta);
-                }
-                Tag::Warn => {
-                    st = st.fg(Color::Yellow);
-                }
-                Tag::Code => {
-                    st = st.fg(Color::Cyan);
-                }
-            }
-        }
-        st
-    }
-
-    fn unescape(s: &str) -> String {
-        s.replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&amp;", "&")
-    }
-
+    let mut parser = XmlishStreamingParser::new();
     let mut out = String::new();
-    let mut stack: Vec<Tag> = Vec::new();
-    let mut cursor = 0usize;
-    while let Some(start) = input[cursor..].find('<') {
-        let start_abs = cursor + start;
-        // Emit text before tag
-        if start_abs > cursor {
-            let seg = &input[cursor..start_abs];
-            let text = unescape(seg);
-            if stack.is_empty() {
-                out.push_str(&text);
-            } else {
-                out.push_str(&style_for_stack(&stack).paint(text).to_string());
-            }
-        }
-        // Find end of tag
-        if let Some(end_rel) = input[start_abs..].find('>') {
-            let end_abs = start_abs + end_rel;
-            let raw = &input[start_abs + 1..end_abs].trim();
-            // Advance cursor after '>'
-            cursor = end_abs + 1;
-
-            // Handle self-closing br
-            let raw_no_space = raw.replace(' ', "");
-            let tag_id = raw_no_space.trim_end_matches('/').to_ascii_lowercase();
-            if tag_id == "br" {
-                out.push('\n');
-                continue;
-            }
-
-            // Closing tag
-            if raw.starts_with('/') {
-                let name = raw[1..].trim().to_ascii_lowercase();
-                let tag = match name.as_str() {
-                    // supported
-                    "bold" | "strong" | "b" => Some(Tag::Bold),
-                    "cmd" => Some(Tag::Cmd),
-                    "info" => Some(Tag::Info),
-                    "file" => Some(Tag::File),
-                    "warn" => Some(Tag::Warn),
-                    "code" => Some(Tag::Code),
-                    // common HTML tags we ignore (no style impact)
-                    "p" | "span" | "div" | "em" | "i" | "u" => None,
-                    _ => None,
-                };
-                if let Some(t) = tag {
-                    // pop the most recent matching tag
-                    if let Some(pos) = stack.iter().rposition(|x| *x == t) {
-                        stack.remove(pos);
-                    }
-                } // else: ignore unknown closing tag
-                continue;
-            }
-
-            // Opening tag
-            let name = raw.to_ascii_lowercase();
-            match name.as_str() {
-                "bold" | "strong" | "b" => stack.push(Tag::Bold),
-                "cmd" => stack.push(Tag::Cmd),
-                "info" => stack.push(Tag::Info),
-                "file" => stack.push(Tag::File),
-                "warn" => stack.push(Tag::Warn),
-                "code" => stack.push(Tag::Code),
-                // Ignore unknown/neutral tags instead of emitting raw
-                _ => { /* no-op */ }
-            }
-        } else {
-            // No closing '>' found: emit the rest literally
-            out.push_str(&input[start_abs..]);
-            cursor = input.len();
-            break;
-        }
-    }
-    // Emit any trailing text
-    if cursor < input.len() {
-        let seg = &input[cursor..];
-        let text = unescape(seg);
-        if stack.is_empty() {
-            out.push_str(&text);
-        } else {
-            out.push_str(&style_for_stack(&stack).paint(text).to_string());
-        }
-    }
-
+    parser.process(input, &mut out);
+    parser.finish(&mut out);
     out
+}
+
+/// Incremental formatter that mirrors `render_xmlish_to_ansi` but streams output.
+pub struct StreamingFormatter {
+    parser: XmlishStreamingParser,
+    raw: String,
+    rendered: String,
+}
+
+impl Default for StreamingFormatter {
+    fn default() -> Self {
+        Self {
+            parser: XmlishStreamingParser::new(),
+            raw: String::new(),
+            rendered: String::new(),
+        }
+    }
+}
+
+impl StreamingFormatter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Push a chunk of model output; returns the formatted delta (if any) to print immediately.
+    pub fn push(&mut self, chunk: &str) -> Option<String> {
+        if chunk.is_empty() {
+            return None;
+        }
+        if !self.raw.is_empty()
+            && chunk.len() >= self.raw.len()
+            && chunk.starts_with(self.raw.as_str())
+        {
+            let suffix = &chunk[self.raw.len()..];
+            self.raw.clear();
+            self.raw.push_str(chunk);
+            return self.ingest_suffix(suffix);
+        }
+
+        self.raw.push_str(chunk);
+        self.ingest_suffix(chunk)
+    }
+
+    /// Flush any buffered text that was waiting for tag/entity completion.
+    pub fn flush(&mut self) -> Option<String> {
+        let mut tail = String::new();
+        self.parser.finish(&mut tail);
+        if tail.is_empty() {
+            None
+        } else {
+            self.rendered.push_str(&tail);
+            Some(tail)
+        }
+    }
+
+    /// Retrieve the full formatted text seen so far.
+    pub fn rendered(&self) -> String {
+        render_xmlish_to_ansi(&self.raw)
+    }
+
+    fn ingest_suffix(&mut self, suffix: &str) -> Option<String> {
+        if suffix.is_empty() {
+            return None;
+        }
+        let mut delta = String::new();
+        self.parser.process(suffix, &mut delta);
+        if delta.is_empty() {
+            None
+        } else {
+            self.rendered.push_str(&delta);
+            Some(delta)
+        }
+    }
 }
 
 /// Print a transient status to stderr (no spinner to keep deps small).
@@ -236,4 +342,67 @@ pub fn compact_blank_lines(input: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StreamingFormatter, render_xmlish_to_ansi};
+
+    fn stream_chunks(input: &str, chunk_size: usize) -> String {
+        let mut fmt = StreamingFormatter::new();
+        for chunk in input.as_bytes().chunks(chunk_size.max(1)) {
+            let piece = std::str::from_utf8(chunk).unwrap();
+            let _ = fmt.push(piece);
+        }
+        let _ = fmt.flush();
+        fmt.rendered()
+    }
+
+    #[test]
+    fn streaming_matches_full_render_for_basic_markup() {
+        let input = "<cmd>ls -la</cmd> then <info>done</info>";
+        let streamed = stream_chunks(input, 3);
+        let rendered = render_xmlish_to_ansi(input);
+        assert_eq!(streamed, rendered);
+    }
+
+    #[test]
+    fn streaming_handles_entities_split_across_chunks() {
+        let input = "Fish &amp; chips <bold>rule</bold>.";
+        let streamed = stream_chunks(input, 2);
+        let rendered = render_xmlish_to_ansi(input);
+        assert_eq!(streamed, rendered);
+    }
+
+    #[test]
+    fn streaming_handles_incomplete_tags() {
+        let input = "<cmd>echo hi</cmd><warn>careful</warn>";
+        let streamed = stream_chunks(input, 1);
+        let rendered = render_xmlish_to_ansi(input);
+        assert_eq!(streamed, rendered);
+    }
+
+    #[test]
+    fn streaming_handles_cumulative_chunks() {
+        let chunks = [
+            "<cmd>ffmpeg -i input.mov output.mp4</cmd>",
+            "<cmd>ffmpeg -i input.mov output.mp4</cmd> <info>done</info>",
+            "<cmd>ffmpeg -i input.mov output.mp4</cmd> <info>done</info>",
+        ];
+        let mut fmt = StreamingFormatter::new();
+        let mut printed = String::new();
+        for chunk in chunks {
+            if let Some(delta) = fmt.push(chunk) {
+                printed.push_str(&delta);
+            }
+        }
+        if let Some(tail) = fmt.flush() {
+            printed.push_str(&tail);
+        }
+        let final_render = fmt.rendered();
+        let expected =
+            render_xmlish_to_ansi("<cmd>ffmpeg -i input.mov output.mp4</cmd> <info>done</info>");
+        assert_eq!(final_render, expected);
+        assert_eq!(printed, expected);
+    }
 }

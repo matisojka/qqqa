@@ -201,8 +201,7 @@ async fn chat_client_sends_custom_headers() {
     );
     headers.insert("X-Title".to_string(), "qqqa".to_string());
 
-    let client =
-        ChatClient::new(server.base_url(), "test".into(), headers, None, None).unwrap();
+    let client = ChatClient::new(server.base_url(), "test".into(), headers, None, None).unwrap();
     let got = client.chat_once("model-x", "Hi", false).await.unwrap();
     assert_eq!(got, "ok");
     mock.assert();
@@ -223,18 +222,26 @@ async fn chat_client_respects_timeout_override() {
             .body(r#"{"choices":[{"message":{"content":"too slow"}}]}"#);
     });
 
-    let client =
-        ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None, Some(1)).unwrap();
+    let client = ChatClient::new(
+        server.base_url(),
+        "test".into(),
+        HashMap::new(),
+        None,
+        Some(1),
+    )
+    .unwrap();
     let start = Instant::now();
     let err = client.chat_once("model-x", "Hi", false).await.unwrap_err();
     let elapsed = start.elapsed();
-    assert!(elapsed < Duration::from_secs(3), "request was not capped by timeout: {:?}", elapsed);
-    let timed_out = err
-        .chain()
-        .any(|cause| {
-            let msg = cause.to_string();
-            msg.contains("deadline") || msg.contains("timed out")
-        });
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "request was not capped by timeout: {:?}",
+        elapsed
+    );
+    let timed_out = err.chain().any(|cause| {
+        let msg = cause.to_string();
+        msg.contains("deadline") || msg.contains("timed out")
+    });
     assert!(timed_out, "unexpected error chain: {err:?}");
     mock.assert();
 }
