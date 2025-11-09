@@ -134,6 +134,7 @@ Example override in `~/.qq/config.json`:
 
 - Optional flag: `no_emoji` (unset by default). Set via `qq --no-fun` or `qa --no-fun`.
 - Optional auto-copy: `copy_first_command` (unset/false by default). Enable during `qq --init`, by running `qq --enable-auto-copy`, or by editing `~/.qq/config.json` so qq copies the first `<cmd>` block to your clipboard. Turn it off with `qq --disable-auto-copy`. Override per run with `--copy-command`/`--cc` or `--no-copy-command`/`--ncc` (also available as `-ncc`).
+- Per-run control: `--no-stream` forces qq to wait for the full response before printing; streaming is the default.
 
 ### Terminal history
 
@@ -143,12 +144,17 @@ Terminal history is **off by default**. During `qq --init` / `qa --init` you can
 
 ### qq - ask a question
 
+qq streams responses by default so you see tokens the moment they arrive. If you prefer the classic buffered output—for example when piping into another tool or copying the final answer as a whole—pass `--no-stream` to wait until the response completes before printing anything.
+
 ```sh
 # simplest
 qq "convert mp4 to mp3"
 
-# stream tokens with formatted output
-qq -s "how do I kill a process by name on macOS"
+# stream tokens by default (formatted output)
+qq "how do I kill a process by name on macOS"
+
+# disable streaming and wait for the full formatted response
+qq --no-stream "summarize today's git status"
 
 # include piped context
 git status | qq "summarize what I should do next"
@@ -257,7 +263,7 @@ qa --no-fun "format and lint the repo"
 qa -y "count lines across *.rs"
 ```
 
-When qa runs a command while stdout is a terminal, output now streams live; the structured `[tool:execute_command]` summary still prints afterward for easy copying.
+When qa runs a command while stdout is a terminal, output streams live; the structured `[tool:execute_command]` summary still prints afterward for easy copying.
 
 `execute_command` prints the proposed command and asks for confirmation. It warns if the working directory is outside your home. Use `-y` to auto approve in trusted workflows.
 
@@ -346,7 +352,7 @@ See CONTRIBUTING.md for guidelines on reporting issues and opening pull requests
 ## Troubleshooting
 
 - API error about missing key: run `qq --init` to set things up, or export the relevant env var, e.g. `export OPENROUTER_API_KEY=...`.
-- No output when streaming: try `-d` to see debug logs.
+- No output while streaming: try `-d` to see debug logs or rerun with `--no-stream` to fall back to buffered output (it might work better in some edge case scenarios).
 - Piped input not detected: ensure you are piping into `qq` and not running it in a subshell that swallows stdin.
 
 ## License

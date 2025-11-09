@@ -30,8 +30,7 @@ pub fn detect_shell(os_type: OsType) -> ShellKind {
 }
 
 fn detect_windows_shell() -> ShellKind {
-    let shell_env = std::env::var_os("SHELL")
-        .map(|val| val.to_string_lossy().to_ascii_lowercase());
+    let shell_env = std::env::var_os("SHELL").map(|val| val.to_string_lossy().to_ascii_lowercase());
     let has_prompt = std::env::var_os("PROMPT").is_some();
     let has_pwsh_markers = std::env::var_os("POWERSHELL_DISTRIBUTION_CHANNEL").is_some()
         || std::env::var_os("WT_PROFILE_ID").is_some()
