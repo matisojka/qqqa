@@ -13,7 +13,7 @@ use std::io::Cursor;
 use std::path::Path;
 use std::time::Duration;
 
-const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 4000;
+const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 800;
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 180;
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
 const DEFAULT_TEMPERATURE: f32 = 0.15;

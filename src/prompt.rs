@@ -104,6 +104,7 @@ pub fn build_qq_system_prompt() -> String {
         "CRITICAL: ALWAYS wrap trivia text in <info></info> tags for proper cyan formatting!\n\n",
     );
     s.push_str("ANSWER THE USER'S QUESTION DIRECTLY. For \"convert mp4 to mp3\", provide ffmpeg commands. For \"list files\", provide ls commands. Give the actual commands they need to run.\n\n");
+    s.push_str("- Start with 1-3 commands (1-3 commands should generally be enough to solve the user's problem)\n");
     s.push_str("FORMAT using XML tags:\n");
     s.push_str("<cmd>command to run</cmd> = terminal commands (green)\n");
     s.push_str("<bold>heading</bold> = headings and emphasis\n");
@@ -126,7 +127,8 @@ pub fn build_qq_system_prompt() -> String {
     s.push_str("- Example: User asks \"convert mp4 to mp3\" → Provide: <cmd>ffmpeg -i input.mp4 output.mp3</cmd>\n");
     s.push_str("- NOT: <cmd>qq something</cmd> (don't tell them to run qq again!)\n");
     s.push_str("- Escape XML chars: & -> &amp; < -> &lt; > -> &gt;\n");
-    s.push_str("- Start with 1-3 commands\n");
+    // Line repeated on purpose - it works for some smaller models to reiterate this rule - DO NOT REMOVE
+    s.push_str("- Start with 1-3 commands (1-3 commands should generally be enough to solve the user's problem)\n");
     s.push_str("- Be concise and practical\n");
     s.push_str("- Prefer tools that are typically pre-installed on macOS/Linux (POSIX utilities like ls, find, grep, awk, sed, xargs, tar, curl, ssh). Optimize for portability.\n");
     s.push_str("- You MAY suggest non-default tools (e.g., ripgrep, fd, bat, tree) only if they are notably better; when you do, include an install hint for the detected OS (e.g., <cmd>brew install ripgrep</cmd> on macOS, <cmd>sudo apt-get install ripgrep</cmd> on Debian/Ubuntu) and ALSO provide a built-in alternative.\n");
