@@ -15,6 +15,24 @@ fn read_args(path: &Path) -> Vec<String> {
         .collect()
 }
 
+fn write_executable_script(path: &Path, contents: &str) {
+    use std::io::Write;
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .expect("create script");
+    file.write_all(contents.as_bytes()).expect("write script");
+    file.sync_all().ok();
+    drop(file);
+
+    let mut perms = fs::metadata(path).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(path, perms).unwrap();
+}
+
 #[tokio::test]
 async fn run_cli_completion_returns_agent_message_from_script() {
     let dir = tempdir().unwrap();
@@ -23,10 +41,7 @@ async fn run_cli_completion_returns_agent_message_from_script() {
 printf '%s\n' '{"type":"item.completed","item":{"type":"reasoning","text":"thinking"}}'
 printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"hello"}}'
 "#;
-    fs::write(&script_path, script).unwrap();
-    let mut perms = fs::metadata(&script_path).unwrap().permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&script_path, perms).unwrap();
+    write_executable_script(&script_path, script);
 
     let text = run_cli_completion(CliCompletionRequest {
         engine: CliEngine::Codex,
@@ -61,10 +76,7 @@ printf '%s\n' '{{"type":"item.completed","item":{{"type":"agent_message","text":
         args = args_dump.display(),
         prompt = prompt_dump.display()
     );
-    fs::write(&script_path, script).unwrap();
-    let mut perms = fs::metadata(&script_path).unwrap().permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&script_path, perms).unwrap();
+    write_executable_script(&script_path, &script);
 
     let base_args = vec!["exec".to_string()];
     let text = run_cli_completion(CliCompletionRequest {
@@ -118,10 +130,7 @@ printf '%s' '{{"type":"result","subtype":"success","result":"<cmd>echo hi</cmd>"
 "#,
         args = args_dump.display()
     );
-    fs::write(&script_path, script).unwrap();
-    let mut perms = fs::metadata(&script_path).unwrap().permissions();
-    perms.set_mode(0o755);
-    fs::set_permissions(&script_path, perms).unwrap();
+    write_executable_script(&script_path, &script);
 
     let text = run_cli_completion(CliCompletionRequest {
         engine: CliEngine::Claude,
