@@ -1,4 +1,4 @@
-use crate::config::ResolvedTlsConfig;
+use crate::config::{CliEngine, ResolvedTlsConfig};
 use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
 use fs_err as fs;
@@ -573,8 +573,170 @@ fn find_single_newline(buf: &[u8]) -> Option<usize> {
     buf.iter().position(|&b| b == b'\n')
 }
 
+mod cli_backend {
+    use super::*;
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+    use tokio::process::Command;
+
+    #[derive(Debug)]
+    pub struct CliCompletionRequest<'a> {
+        pub engine: CliEngine,
+        pub binary: &'a str,
+        pub base_args: &'a [String],
+        pub system_prompt: &'a str,
+        pub user_prompt: &'a str,
+        pub model: &'a str,
+        pub reasoning_effort: Option<&'a str>,
+        pub debug: bool,
+    }
+
+    pub async fn run_cli_completion(req: CliCompletionRequest<'_>) -> Result<String> {
+        match req.engine {
+            CliEngine::Codex => run_codex(req).await,
+        }
+    }
+
+    async fn run_codex(req: CliCompletionRequest<'_>) -> Result<String> {
+        let mut cmd = Command::new(req.binary);
+        if req.base_args.is_empty() {
+            cmd.arg("exec");
+        } else {
+            cmd.args(req.base_args);
+        }
+        cmd.arg("--json");
+        let reasoning = req.reasoning_effort.unwrap_or("minimal");
+        cmd.arg("-c");
+        cmd.arg(format!("model_reasoning_effort={}", reasoning));
+        cmd.arg("-c");
+        cmd.arg("sandbox_mode=read-only");
+        cmd.arg("-c");
+        cmd.arg("tools.web_search=false");
+        cmd.arg("-");
+
+        let mut prompt = String::new();
+        prompt.push_str("<system-prompt>\n");
+        prompt.push_str(req.system_prompt);
+        prompt.push_str("\n</system-prompt>\n\n");
+        prompt.push_str("<user-prompt>\n");
+        prompt.push_str(req.user_prompt);
+        prompt.push_str("\n</user-prompt>\n");
+
+        if req.debug {
+            eprintln!(
+                "[debug] Running CLI provider '{}' with args: {:?}",
+                req.binary, cmd
+            );
+        }
+
+        let mut child = cmd
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| {
+                format!(
+                    "Failed to spawn CLI provider '{}'. Is it installed and on your PATH?",
+                    req.binary
+                )
+            })?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(prompt.as_bytes())
+                .await
+                .context("Writing prompt to CLI provider stdin")?;
+        }
+
+        let output = child.wait_with_output().await?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return Err(anyhow!(
+                "CLI provider '{}' exited with status {}.{}{}",
+                req.binary,
+                output
+                    .status
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "signal".to_string()),
+                if stdout.trim().is_empty() {
+                    "".to_string()
+                } else {
+                    format!("\nstdout: {}", stdout.trim())
+                },
+                if stderr.trim().is_empty() {
+                    "".to_string()
+                } else {
+                    format!("\nstderr: {}", stderr.trim())
+                }
+            ));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        parse_codex_response(&stdout)
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct CodexEvent {
+        #[serde(rename = "type")]
+        event_type: String,
+        #[serde(default)]
+        item: Option<CodexItem>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct CodexItem {
+        #[serde(rename = "type")]
+        item_type: String,
+        #[serde(default)]
+        text: Option<String>,
+    }
+
+    fn parse_codex_response(stdout: &str) -> Result<String> {
+        let mut messages = Vec::new();
+        for line in stdout.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<CodexEvent>(trimmed) {
+                Ok(event) => {
+                    if event.event_type == "item.completed" {
+                        if let Some(item) = event.item {
+                            if item.item_type == "agent_message" {
+                                if let Some(text) = item.text {
+                                    if !text.trim().is_empty() {
+                                        messages.push(text);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(_) => {
+                    continue;
+                }
+            }
+        }
+        if messages.is_empty() {
+            return Err(anyhow!("CLI provider returned no agent_message text."));
+        }
+        Ok(messages.join("\n\n"))
+    }
+
+    #[cfg(test)]
+    pub(super) fn parse_codex_response_for_test(input: &str) -> Result<String> {
+        parse_codex_response(input)
+    }
+}
+
+pub use cli_backend::{CliCompletionRequest, run_cli_completion};
+
 #[cfg(test)]
 mod tests {
+    use super::cli_backend::parse_codex_response_for_test;
     use super::load_root_certificates;
     use rcgen::{CertifiedKey, generate_simple_self_signed};
     use std::fs;
@@ -605,5 +767,15 @@ mod tests {
 
         let certs = load_root_certificates(&path).expect("certs load");
         assert_eq!(certs.len(), 1);
+    }
+
+    #[test]
+    fn codex_parser_returns_last_agent_message() {
+        let payload = r#"{"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"Reasoning"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"First"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Second"}}"#;
+        let merged = payload.replace('\n', "\n");
+        let parsed = parse_codex_response_for_test(&merged).expect("parse");
+        assert_eq!(parsed, "First\n\nSecond");
     }
 }

@@ -1,8 +1,8 @@
 use anyhow::{Result, anyhow};
 use clap::{ArgAction, Parser};
-use qqqa::ai::{ChatClient, Msg};
+use qqqa::ai::{ChatClient, CliCompletionRequest, Msg, run_cli_completion};
 use qqqa::clipboard;
-use qqqa::config::{Config, InitExistsError};
+use qqqa::config::{Config, InitExistsError, ProviderConnection};
 use qqqa::formatting::{
     StreamingFormatter, print_assistant_text, print_stream_token, render_xmlish_to_ansi,
     start_loading_animation,
@@ -172,16 +172,33 @@ async fn main() -> Result<()> {
         }
     };
     if let Some(base) = cli.api_base.as_deref() {
-        eff.base_url = base.to_string();
+        if let Some(http) = eff.http_mut() {
+            http.base_url = base.to_string();
+        } else {
+            return Err(anyhow!(
+                "--api-base override is only supported for HTTP providers (current: '{}').",
+                eff.provider_key
+            ));
+        }
     }
     if let Some(temp) = cli.temperature {
         eff.temperature = Some(temp);
     }
     if cli.debug {
-        eprintln!(
-            "[debug] Using provider='{}' base_url='{}' model='{}'",
-            eff.provider_key, eff.base_url, eff.model
-        );
+        match &eff.connection {
+            ProviderConnection::Http(conn) => {
+                eprintln!(
+                    "[debug] Using provider='{}' base_url='{}' model='{}'",
+                    eff.provider_key, conn.base_url, eff.model
+                );
+            }
+            ProviderConnection::Cli(conn) => {
+                eprintln!(
+                    "[debug] Using provider='{}' cli_binary='{}' model='{}'",
+                    eff.provider_key, conn.binary, eff.model
+                );
+            }
+        }
     }
 
     // Read terminal history unless disabled.
@@ -218,95 +235,104 @@ async fn main() -> Result<()> {
         &question,
     );
 
-    // Prepare HTTP client.
-    let client = ChatClient::new(
-        eff.base_url.clone(),
-        eff.api_key.clone(),
-        eff.headers.clone(),
-        eff.tls.as_ref(),
-        eff.request_timeout_secs,
-    )?
-    .with_reasoning_effort(eff.reasoning_effort.clone())
-    .with_temperature(eff.temperature, eff.temperature.is_some());
+    // Prepare backend-specific client.
+    let http_client = match &eff.connection {
+        ProviderConnection::Http(conn) => Some(
+            ChatClient::new(
+                conn.base_url.clone(),
+                conn.api_key.clone(),
+                conn.headers.clone(),
+                conn.tls.as_ref(),
+                conn.request_timeout_secs,
+            )?
+            .with_reasoning_effort(eff.reasoning_effort.clone())
+            .with_temperature(eff.temperature, eff.temperature.is_some()),
+        ),
+        ProviderConnection::Cli(_) => None,
+    };
 
-    // Stream or buffered request per flag.
-    if !cli.no_stream {
-        // If pretty output is desired, buffer tokens to render XML-ish after stream completes.
-        if cli.raw {
-            // One empty line before streamed raw output
-            println!("");
-            let msgs = [
-                Msg {
-                    role: "system",
-                    content: &system,
-                },
-                Msg {
-                    role: "user",
-                    content: &user,
-                },
-            ];
-            let mut raw_buffer = String::new();
-            client
-                .chat_stream_messages(&eff.model, &msgs, cli.debug, |tok| {
-                    raw_buffer.push_str(tok);
-                    print_stream_token(tok);
-                })
-                .await?;
-            println!();
-            maybe_copy_first_command(&raw_buffer, copy_enabled, cli.raw, cli.debug);
-        } else {
-            let msgs = [
-                Msg {
-                    role: "system",
-                    content: &system,
-                },
-                Msg {
-                    role: "user",
-                    content: &user,
-                },
-            ];
-            let mut buf = String::new();
-            let mut formatter = StreamingFormatter::new();
-            let mut writer = PrettyStreamWriter::new();
-            // One empty line before streamed formatted output
-            println!("");
-            client
-                .chat_stream_messages(&eff.model, &msgs, cli.debug, |tok| {
-                    buf.push_str(tok);
-                    if let Some(delta) = formatter.push(tok) {
-                        writer.write(&delta);
+    let messages = [
+        Msg {
+            role: "system",
+            content: &system,
+        },
+        Msg {
+            role: "user",
+            content: &user,
+        },
+    ];
+
+    match (&eff.connection, &http_client) {
+        (ProviderConnection::Http(_), Some(client)) => {
+            if !cli.no_stream {
+                if cli.raw {
+                    println!("");
+                    let mut raw_buffer = String::new();
+                    client
+                        .chat_stream_messages(&eff.model, &messages, cli.debug, |tok| {
+                            raw_buffer.push_str(tok);
+                            print_stream_token(tok);
+                        })
+                        .await?;
+                    println!();
+                    maybe_copy_first_command(&raw_buffer, copy_enabled, cli.raw, cli.debug);
+                } else {
+                    println!("");
+                    let mut buf = String::new();
+                    let mut formatter = StreamingFormatter::new();
+                    let mut writer = PrettyStreamWriter::new();
+                    client
+                        .chat_stream_messages(&eff.model, &messages, cli.debug, |tok| {
+                            buf.push_str(tok);
+                            if let Some(delta) = formatter.push(tok) {
+                                writer.write(&delta);
+                            }
+                        })
+                        .await?;
+                    if let Some(tail) = formatter.flush() {
+                        if !tail.is_empty() {
+                            writer.write(&tail);
+                        }
                     }
-                })
-                .await?;
-            if let Some(tail) = formatter.flush() {
-                if !tail.is_empty() {
-                    writer.write(&tail);
+                    println!("");
+                    maybe_copy_first_command(&buf, copy_enabled, cli.raw, cli.debug);
                 }
+            } else {
+                let loading = start_loading_animation();
+                let full = client
+                    .chat_once_messages(&eff.model, &messages, cli.debug)
+                    .await?;
+                drop(loading);
+                println!("");
+                print_assistant_text(&full, cli.raw);
+                maybe_copy_first_command(&full, copy_enabled, cli.raw, cli.debug);
             }
-            println!("");
-            maybe_copy_first_command(&buf, copy_enabled, cli.raw, cli.debug);
         }
-    } else {
-        let loading = start_loading_animation();
-        let msgs = [
-            Msg {
-                role: "system",
-                content: &system,
-            },
-            Msg {
-                role: "user",
-                content: &user,
-            },
-        ];
-        let full = client
-            .chat_once_messages(&eff.model, &msgs, cli.debug)
+        (ProviderConnection::Cli(cli_conn), _) => {
+            if !cli.no_stream && cli.debug {
+                eprintln!(
+                    "[debug] CLI provider '{}' does not support streaming; buffering output.",
+                    eff.provider_key
+                );
+            }
+            let loading = start_loading_animation();
+            let response = run_cli_completion(CliCompletionRequest {
+                engine: cli_conn.engine,
+                binary: &cli_conn.binary,
+                base_args: &cli_conn.base_args,
+                system_prompt: &system,
+                user_prompt: &user,
+                model: &eff.model,
+                reasoning_effort: eff.reasoning_effort.as_deref(),
+                debug: cli.debug,
+            })
             .await?;
-        // Ensure the animation is stopped and cleared before printing the answer
-        drop(loading);
-        // One empty line before the first line of the answer
-        println!("");
-        print_assistant_text(&full, cli.raw);
-        maybe_copy_first_command(&full, copy_enabled, cli.raw, cli.debug);
+            drop(loading);
+            println!("");
+            print_assistant_text(&response, cli.raw);
+            maybe_copy_first_command(&response, copy_enabled, cli.raw, cli.debug);
+        }
+        _ => unreachable!("Provider/client mismatch"),
     }
 
     Ok(())
