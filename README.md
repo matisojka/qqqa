@@ -116,6 +116,7 @@ Defaults written to `~/.qq/config.json`:
   - `ollama` → model `llama3.1`
   - `anthropic` → model `claude-3-5-sonnet-20241022` (inactive placeholder until Anthropic integration lands)
 - Optional per-profile `reasoning_effort` for GPT-5 family models. If you leave it unset, qqqa sends `"reasoning_effort": "minimal"` for any `gpt-5*` model to keep responses fast. Set it to `"low"`, `"medium"`, or `"high"` when you want deeper reasoning.
+- (discouraged) Optional per-profile `temperature`. Most models default to `0.15` unless you set it in `~/.qq/config.json` or pass `--temperature <value>` for a single run. GPT-5 models ignore custom temperatures; qqqa forces them to `1.0`.
 - (discouraged): you can change the timeout, e.g. `"timeout": "240"` under a model profile in `~/.qq/config.json` to raise the per-request limit (`qq` + `qa` default to 180 s - this is SLOW; faster models are a better fix).
 
 Example override in `~/.qq/config.json`:
@@ -155,6 +156,9 @@ qq "how do I kill a process by name on macOS"
 
 # disable streaming and wait for the full formatted response
 qq --no-stream "summarize today's git status"
+
+# bump temperature for non GPT-5 models on a single run
+qq --temperature 0.4 "draft a playful git commit message"
 
 # include piped context
 git status | qq "summarize what I should do next"
@@ -255,6 +259,9 @@ qa -y "count lines across *.rs"
 
 # include recent qq/qa commands just for this run
 qa --history "trace which git commands I ran recently"
+
+# raise temperature for this run (non GPT-5 models only)
+qa --temperature 0.3 "brainstorm fun git aliases"
 
 # disable emojis in responses (persists)
 qa --no-fun "format and lint the repo"

@@ -122,10 +122,11 @@ async fn chat_once_uses_legacy_parameters_for_old_models() {
                     Some(4000)
                 );
                 assert!(payload.get("max_completion_tokens").is_none());
-                assert_eq!(
-                    payload.get("temperature").and_then(|v| v.as_f64()),
-                    Some(0.0)
-                );
+                let temp = payload
+                    .get("temperature")
+                    .and_then(|v| v.as_f64())
+                    .expect("temperature present for legacy model");
+                assert!((temp - 0.15).abs() < 1e-6);
                 assert!(payload.get("reasoning_effort").is_none());
                 true
             });
@@ -137,6 +138,79 @@ async fn chat_once_uses_legacy_parameters_for_old_models() {
     let client =
         ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None, None).unwrap();
     let got = client.chat_once("gpt-4.1-mini", "Hi", false).await.unwrap();
+    assert_eq!(got, "ok");
+    mock.assert();
+}
+
+#[tokio::test]
+async fn chat_once_defaults_temperature_for_o1_models() {
+    if sandbox_blocks_binding() {
+        eprintln!("[skip] sandbox blocks binding to 127.0.0.1; skipping httpmock test");
+        return;
+    }
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/chat/completions")
+            .matches(|req: &HttpMockRequest| {
+                let body = req
+                    .body
+                    .as_ref()
+                    .expect("expected request body for o1 model");
+                let payload: Value =
+                    serde_json::from_slice(body).expect("request body should be valid JSON");
+                assert!(payload.get("max_completion_tokens").is_some());
+                let temp = payload
+                    .get("temperature")
+                    .and_then(|v| v.as_f64())
+                    .expect("temperature present for o1 model");
+                assert!((temp - 0.15).abs() < 1e-6);
+                true
+            });
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"choices":[{"message":{"content":"ok"}}]}"#);
+    });
+
+    let client =
+        ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None, None).unwrap();
+    let got = client.chat_once("o1-preview", "Hi", false).await.unwrap();
+    assert_eq!(got, "ok");
+    mock.assert();
+}
+
+#[tokio::test]
+async fn chat_once_forces_temperature_for_gpt5_overrides() {
+    if sandbox_blocks_binding() {
+        eprintln!("[skip] sandbox blocks binding to 127.0.0.1; skipping httpmock test");
+        return;
+    }
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST)
+            .path("/chat/completions")
+            .matches(|req: &HttpMockRequest| {
+                let body = req
+                    .body
+                    .as_ref()
+                    .expect("expected request body for gpt-5 override");
+                let payload: Value =
+                    serde_json::from_slice(body).expect("request body should be valid JSON");
+                assert_eq!(
+                    payload.get("temperature").and_then(|v| v.as_f64()),
+                    Some(1.0)
+                );
+                true
+            });
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(r#"{"choices":[{"message":{"content":"ok"}}]}"#);
+    });
+
+    let client = ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None, None)
+        .unwrap()
+        .with_temperature(Some(0.42), true);
+    let got = client.chat_once("gpt-5-mini", "Hi", false).await.unwrap();
     assert_eq!(got, "ok");
     mock.assert();
 }

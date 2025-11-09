@@ -16,6 +16,7 @@ use std::time::Duration;
 const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 4000;
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 180;
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
+const DEFAULT_TEMPERATURE: f32 = 0.15;
 
 /// Minimal OpenAI-compatible chat streaming delta payload
 #[derive(Debug, Deserialize)]
@@ -93,11 +94,19 @@ pub enum AssistantReply {
     },
 }
 
+#[derive(Clone, Copy)]
+enum TemperatureDirective {
+    Omit,
+    Send(f32),
+}
+
 pub struct ChatClient {
     client: Client,
     base_url: String,
     api_key: String,
     reasoning_effort: Option<String>,
+    temperature_override: Option<f32>,
+    temperature_user_override: bool,
     default_headers: HeaderMap,
 }
 
@@ -134,12 +143,20 @@ impl ChatClient {
             base_url,
             api_key,
             reasoning_effort: None,
+            temperature_override: None,
+            temperature_user_override: false,
             default_headers,
         })
     }
 
     pub fn with_reasoning_effort(mut self, reasoning_effort: Option<String>) -> Self {
         self.reasoning_effort = reasoning_effort;
+        self
+    }
+
+    pub fn with_temperature(mut self, temperature: Option<f32>, user_provided: bool) -> Self {
+        self.temperature_override = temperature;
+        self.temperature_user_override = user_provided && temperature.is_some();
         self
     }
 
@@ -157,6 +174,10 @@ impl ChatClient {
         PREFIXES.iter().any(|prefix| lower.starts_with(prefix))
     }
 
+    fn is_gpt5_model(model: &str) -> bool {
+        model.to_ascii_lowercase().starts_with("gpt-5")
+    }
+
     fn max_tokens_param(model: &str) -> &'static str {
         if Self::is_new_style_model(model) {
             "max_completion_tokens"
@@ -165,27 +186,48 @@ impl ChatClient {
         }
     }
 
-    fn supports_temperature(model: &str) -> bool {
-        !Self::is_new_style_model(model)
+    fn temperature_directive(&self, model: &str) -> TemperatureDirective {
+        if Self::is_gpt5_model(model) {
+            if self.temperature_override.is_some() {
+                TemperatureDirective::Send(1.0)
+            } else {
+                TemperatureDirective::Omit
+            }
+        } else {
+            TemperatureDirective::Send(self.temperature_override.unwrap_or(DEFAULT_TEMPERATURE))
+        }
     }
 
     fn default_reasoning_effort(model: &str) -> Option<&'static str> {
-        if model.to_ascii_lowercase().starts_with("gpt-5") {
+        if Self::is_gpt5_model(model) {
             Some("minimal")
         } else {
             None
         }
     }
 
-    fn apply_model_defaults(&self, body: &mut Value, model: &str, max_tokens: u32) {
+    fn apply_model_defaults(&self, body: &mut Value, model: &str, max_tokens: u32, debug: bool) {
         if let Some(obj) = body.as_object_mut() {
             obj.remove("max_tokens");
             obj.remove("max_completion_tokens");
             obj.insert(Self::max_tokens_param(model).to_string(), json!(max_tokens));
-            if Self::supports_temperature(model) {
-                obj.insert("temperature".into(), json!(0.0));
-            } else {
-                obj.remove("temperature");
+            match self.temperature_directive(model) {
+                TemperatureDirective::Send(value) => {
+                    obj.insert("temperature".into(), json!(value));
+                }
+                TemperatureDirective::Omit => {
+                    obj.remove("temperature");
+                }
+            }
+            if debug
+                && Self::is_gpt5_model(model)
+                && self.temperature_user_override
+                && self.temperature_override.is_some()
+            {
+                eprintln!(
+                    "[warn] Overriding requested temperature to 1.0 for GPT-5 model '{}'.",
+                    model
+                );
             }
             let reasoning = if Self::default_reasoning_effort(model).is_some() {
                 self.reasoning_effort
@@ -214,7 +256,7 @@ impl ChatClient {
                 {"role": "user", "content": prompt}
             ]
         });
-        self.apply_model_defaults(&mut body, model, DEFAULT_MAX_COMPLETION_TOKENS);
+        self.apply_model_defaults(&mut body, model, DEFAULT_MAX_COMPLETION_TOKENS, debug);
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
             eprintln!("[debug] POST {} ({} bytes)", self.chat_url(), bytes.len());
@@ -251,7 +293,7 @@ impl ChatClient {
             "model": model,
             "messages": messages
         });
-        self.apply_model_defaults(&mut body, model, DEFAULT_MAX_COMPLETION_TOKENS);
+        self.apply_model_defaults(&mut body, model, DEFAULT_MAX_COMPLETION_TOKENS, debug);
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
             eprintln!("[debug] POST {} ({} bytes)", self.chat_url(), bytes.len());
@@ -290,7 +332,7 @@ impl ChatClient {
             "messages": messages,
             "tools": tools
         });
-        self.apply_model_defaults(&mut body, model, DEFAULT_MAX_COMPLETION_TOKENS);
+        self.apply_model_defaults(&mut body, model, DEFAULT_MAX_COMPLETION_TOKENS, debug);
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
             eprintln!("[debug] POST {} ({} bytes)", self.chat_url(), bytes.len());
@@ -346,7 +388,7 @@ impl ChatClient {
             ],
             "stream": true
         });
-        self.apply_model_defaults(&mut body, model, DEFAULT_MAX_COMPLETION_TOKENS);
+        self.apply_model_defaults(&mut body, model, DEFAULT_MAX_COMPLETION_TOKENS, debug);
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
             eprintln!(
@@ -426,7 +468,7 @@ impl ChatClient {
             "messages": messages,
             "stream": true
         });
-        self.apply_model_defaults(&mut body, model, DEFAULT_MAX_COMPLETION_TOKENS);
+        self.apply_model_defaults(&mut body, model, DEFAULT_MAX_COMPLETION_TOKENS, debug);
         if debug {
             let bytes = serde_json::to_vec(&body).unwrap();
             eprintln!(
