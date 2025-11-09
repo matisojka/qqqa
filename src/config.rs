@@ -22,9 +22,37 @@ impl std::fmt::Display for InitExistsError {
 
 impl std::error::Error for InitExistsError {}
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderMode {
+    Http,
+    Cli,
+}
+
+impl Default for ProviderMode {
+    fn default() -> Self {
+        ProviderMode::Http
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CliEngine {
+    Codex,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CliProviderConfig {
+    pub engine: CliEngine,
+    pub binary: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub base_args: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelProvider {
     pub name: String,
+    #[serde(default)]
     pub base_url: String,
     pub env_key: String,
     /// Optional inline api key in config. Env var takes precedence only if this is absent.
@@ -36,6 +64,12 @@ pub struct ModelProvider {
     /// Optional TLS customization per provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tls: Option<ProviderTlsConfig>,
+    /// Whether the provider talks to an HTTP API or a CLI binary.
+    #[serde(default)]
+    pub mode: ProviderMode,
+    /// Optional CLI-specific parameters (required when mode = cli).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli: Option<CliProviderConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -98,6 +132,8 @@ impl Default for Config {
                 api_key: None,
                 local: false,
                 tls: None,
+                mode: ProviderMode::Http,
+                cli: None,
             },
         );
         model_providers.insert(
@@ -109,6 +145,8 @@ impl Default for Config {
                 api_key: None,
                 local: false,
                 tls: None,
+                mode: ProviderMode::Http,
+                cli: None,
             },
         );
         model_providers.insert(
@@ -120,6 +158,8 @@ impl Default for Config {
                 api_key: None,
                 local: false,
                 tls: None,
+                mode: ProviderMode::Http,
+                cli: None,
             },
         );
         model_providers.insert(
@@ -131,6 +171,8 @@ impl Default for Config {
                 api_key: None,
                 local: false,
                 tls: None,
+                mode: ProviderMode::Http,
+                cli: None,
             },
         );
         model_providers.insert(
@@ -142,6 +184,25 @@ impl Default for Config {
                 api_key: None,
                 local: true,
                 tls: None,
+                mode: ProviderMode::Http,
+                cli: None,
+            },
+        );
+        model_providers.insert(
+            "codex".to_string(),
+            ModelProvider {
+                name: "Codex CLI".to_string(),
+                base_url: "cli://codex".to_string(),
+                env_key: "CODEX_CLI_API_KEY".to_string(),
+                api_key: None,
+                local: true,
+                tls: None,
+                mode: ProviderMode::Cli,
+                cli: Some(CliProviderConfig {
+                    engine: CliEngine::Codex,
+                    binary: "codex".to_string(),
+                    base_args: vec!["exec".to_string()],
+                }),
             },
         );
 
@@ -196,6 +257,16 @@ impl Default for Config {
                 timeout: None,
             },
         );
+        profiles.insert(
+            "codex".to_string(),
+            Profile {
+                model_provider: "codex".to_string(),
+                model: "gpt-5".to_string(),
+                reasoning_effort: Some("minimal".to_string()),
+                temperature: None,
+                timeout: None,
+            },
+        );
 
         Self {
             default_profile: "openrouter".to_string(),
@@ -209,19 +280,60 @@ impl Default for Config {
     }
 }
 
-/// The resolved configuration for a run: provider, model, base URL and api key.
 #[derive(Debug, Clone)]
-pub struct EffectiveProfile {
-    pub provider_key: String,
-    pub model: String,
+pub struct HttpConnection {
     pub base_url: String,
     pub api_key: String,
-    pub reasoning_effort: Option<String>,
-    pub temperature: Option<f32>,
     pub request_timeout_secs: Option<u64>,
     pub is_local: bool,
     pub headers: HashMap<String, String>,
     pub tls: Option<ResolvedTlsConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CliConnection {
+    pub engine: CliEngine,
+    pub binary: String,
+    pub base_args: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ProviderConnection {
+    Http(HttpConnection),
+    Cli(CliConnection),
+}
+
+/// The resolved configuration for a run: provider, model, and backend connection info.
+#[derive(Debug, Clone)]
+pub struct EffectiveProfile {
+    pub provider_key: String,
+    pub model: String,
+    pub connection: ProviderConnection,
+    pub reasoning_effort: Option<String>,
+    pub temperature: Option<f32>,
+}
+
+impl EffectiveProfile {
+    pub fn http(&self) -> Option<&HttpConnection> {
+        match &self.connection {
+            ProviderConnection::Http(conn) => Some(conn),
+            _ => None,
+        }
+    }
+
+    pub fn http_mut(&mut self) -> Option<&mut HttpConnection> {
+        match &mut self.connection {
+            ProviderConnection::Http(conn) => Some(conn),
+            _ => None,
+        }
+    }
+
+    pub fn cli(&self) -> Option<&CliConnection> {
+        match &self.connection {
+            ProviderConnection::Cli(conn) => Some(conn),
+            _ => None,
+        }
+    }
 }
 
 impl Config {
@@ -330,24 +442,6 @@ impl Config {
             .ok_or_else(|| anyhow!("Model provider '{}' not found in config", provider_key))?;
 
         let model = model_override.unwrap_or(&profile.model).to_string();
-        let base_url = provider.base_url.clone();
-        let headers = provider_default_headers(provider_key);
-
-        // Prefer inline api_key; else env var per env_key. Local providers fall back to a
-        // placeholder key so callers can continue to send an Authorization header.
-        let api_key = if let Some(k) = provider.api_key.clone() {
-            k
-        } else if let Ok(value) = std::env::var(&provider.env_key) {
-            value
-        } else if provider.local {
-            LOCAL_PROVIDER_PLACEHOLDER_API_KEY.to_string()
-        } else {
-            return Err(anyhow!(
-                "Missing API key: set '{}' env var or add 'api_key' to provider '{}' in config",
-                provider.env_key,
-                provider_key
-            ));
-        };
 
         let request_timeout_secs = if let Some(raw) = profile.timeout.as_deref() {
             let trimmed = raw.trim();
@@ -372,24 +466,74 @@ impl Config {
         } else {
             None
         };
-        let tls = provider
-            .tls
-            .as_ref()
-            .map(|cfg| cfg.resolve(config_dir))
-            .transpose()?
-            .flatten();
+        let effective_mode = if provider.mode == ProviderMode::Cli {
+            ProviderMode::Cli
+        } else if provider.cli.is_some() {
+            // Backward compatibility: treating presence of CLI config as a signal.
+            ProviderMode::Cli
+        } else {
+            ProviderMode::Http
+        };
+
+        let connection = match effective_mode {
+            ProviderMode::Http => {
+                if provider.base_url.trim().is_empty() {
+                    return Err(anyhow!(
+                        "Provider '{}' must define a non-empty base_url",
+                        provider_key
+                    ));
+                }
+                let headers = provider_default_headers(provider_key);
+                // Prefer inline api_key; else env var per env_key. Local providers fall back to a
+                // placeholder key so callers can continue to send an Authorization header.
+                let api_key = if let Some(k) = provider.api_key.clone() {
+                    k
+                } else if let Ok(value) = std::env::var(&provider.env_key) {
+                    value
+                } else if provider.local {
+                    LOCAL_PROVIDER_PLACEHOLDER_API_KEY.to_string()
+                } else {
+                    return Err(anyhow!(
+                        "Missing API key: set '{}' env var or add 'api_key' to provider '{}' in config",
+                        provider.env_key,
+                        provider_key
+                    ));
+                };
+                let tls = provider
+                    .tls
+                    .as_ref()
+                    .map(|cfg| cfg.resolve(config_dir))
+                    .transpose()?
+                    .flatten();
+
+                ProviderConnection::Http(HttpConnection {
+                    base_url: provider.base_url.clone(),
+                    api_key,
+                    request_timeout_secs,
+                    is_local: provider.local,
+                    headers,
+                    tls,
+                })
+            }
+            ProviderMode::Cli => {
+                let cli = provider
+                    .cli
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("Provider '{}' missing cli settings", provider_key))?;
+                ProviderConnection::Cli(CliConnection {
+                    engine: cli.engine.clone(),
+                    binary: cli.binary.clone(),
+                    base_args: cli.base_args.clone(),
+                })
+            }
+        };
 
         Ok(EffectiveProfile {
             provider_key: provider_key.clone(),
             model,
-            base_url,
-            api_key,
+            connection,
             reasoning_effort: profile.reasoning_effort.clone(),
             temperature: profile.temperature,
-            request_timeout_secs,
-            is_local: provider.local,
-            headers,
-            tls,
         })
     }
 
@@ -422,7 +566,10 @@ impl Config {
         println!("  [3] OpenAI — gpt-5-mini (slower, a bit smarter)");
         println!("  [4] Anthropic — claude-3-5-sonnet-20241022 (Claude by Anthropic)");
         println!("  [5] Ollama — llama3.1 via http://127.0.0.1:11434/v1 (runs locally)");
-        print!("Enter 1, 2, 3, 4, or 5 [1]: ");
+        println!(
+            "  [6] Codex CLI — leverage the installed `codex` binary (uses your ChatGPT subscription)"
+        );
+        print!("Enter 1, 2, 3, 4, 5, or 6 [1]: ");
         io::stdout().flush().ok();
         let mut choice = String::new();
         io::stdin().read_line(&mut choice).ok();
@@ -432,6 +579,7 @@ impl Config {
             "3" | "openai" => cfg.default_profile = "openai".to_string(),
             "4" | "anthropic" => cfg.default_profile = "anthropic".to_string(),
             "5" | "ollama" => cfg.default_profile = "ollama".to_string(),
+            "6" | "codex" => cfg.default_profile = "codex".to_string(),
             "1" | "openrouter" => cfg.default_profile = "openrouter".to_string(),
             _ => cfg.default_profile = "openrouter".to_string(),
         }
@@ -444,54 +592,70 @@ impl Config {
             .ok_or_else(|| anyhow!("Internal error: missing provider {}", provider_key))?
             .clone();
 
-        let env_hint = provider.env_key.clone();
-        if provider.local {
-            println!(
-                "\n{} runs locally at {}. No API key is required; press Enter to continue or paste one if your setup needs it.",
-                provider.name, provider.base_url
-            );
-        } else {
-            println!(
-                "\nEnter {} (optional). Leave empty to use env var {}.",
-                provider.name, env_hint
-            );
-        }
-        print!("{}: ", provider.name);
-        io::stdout().flush().ok();
-        let mut key_in = String::new();
-        io::stdin().read_line(&mut key_in).ok();
-        let key_in = key_in.trim().to_string();
-
-        if !key_in.is_empty() {
-            if let Some(mp) = cfg.model_providers.get_mut(&provider_key) {
-                mp.api_key = Some(key_in);
-            }
-        } else if !provider.local {
-            // No inline key; check if env is present and warn if missing.
-            if std::env::var(&env_hint).is_err() {
+        if provider.mode == ProviderMode::Http {
+            let env_hint = provider.env_key.clone();
+            if provider.local {
                 println!(
-                    "Hint: export {}=YOUR_KEY (e.g., add to your shell profile).",
-                    env_hint
+                    "\n{} runs locally at {}. No API key is required; press Enter to continue or paste one if your setup needs it.",
+                    provider.name, provider.base_url
+                );
+            } else {
+                println!(
+                    "\nEnter {} (optional). Leave empty to use env var {}.",
+                    provider.name, env_hint
                 );
             }
-        }
-
-        if provider.local {
-            let default_base = provider.base_url.clone();
-            println!(
-                "\n{} runs via an OpenAI-compatible server. Override the base URL if you changed the port (default {}).",
-                provider.name, default_base
-            );
-            print!("Base URL [{}]: ", default_base);
+            print!("{}: ", provider.name);
             io::stdout().flush().ok();
-            let mut base_in = String::new();
-            io::stdin().read_line(&mut base_in).ok();
-            let base_in = base_in.trim();
-            if !base_in.is_empty() {
+            let mut key_in = String::new();
+            io::stdin().read_line(&mut key_in).ok();
+            let key_in = key_in.trim().to_string();
+
+            if !key_in.is_empty() {
                 if let Some(mp) = cfg.model_providers.get_mut(&provider_key) {
-                    mp.base_url = base_in.to_string();
+                    mp.api_key = Some(key_in);
+                }
+            } else if !provider.local {
+                // No inline key; check if env is present and warn if missing.
+                if std::env::var(&env_hint).is_err() {
+                    println!(
+                        "Hint: export {}=YOUR_KEY (e.g., add to your shell profile).",
+                        env_hint
+                    );
                 }
             }
+
+            if provider.local {
+                let default_base = provider.base_url.clone();
+                println!(
+                    "\n{} runs via an OpenAI-compatible server. Override the base URL if you changed the port (default {}).",
+                    provider.name, default_base
+                );
+                print!("Base URL [{}]: ", default_base);
+                io::stdout().flush().ok();
+                let mut base_in = String::new();
+                io::stdin().read_line(&mut base_in).ok();
+                let base_in = base_in.trim();
+                if !base_in.is_empty() {
+                    if let Some(mp) = cfg.model_providers.get_mut(&provider_key) {
+                        mp.base_url = base_in.to_string();
+                    }
+                }
+            }
+        } else {
+            let binary = cfg
+                .model_providers
+                .get(&provider_key)
+                .and_then(|mp| mp.cli.as_ref())
+                .map(|cli| cli.binary.clone())
+                .unwrap_or_else(|| "codex".to_string());
+            println!(
+                "\n{} uses the '{}' CLI binary. Install Codex CLI (part of the ChatGPT desktop app or `pip install codex-cli`) and ensure it is on your PATH.",
+                provider.name, binary
+            );
+            println!(
+                "No API key is required; authentication happens through the Codex CLI itself."
+            );
         }
 
         println!("\nShare recent `qq` / `qa` commands with the model?");

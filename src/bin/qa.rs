@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use clap::{ArgAction, Parser};
-use qqqa::ai::{AssistantReply, ChatClient, Msg};
-use qqqa::config::{Config, InitExistsError};
+use qqqa::ai::{AssistantReply, ChatClient, CliCompletionRequest, Msg, run_cli_completion};
+use qqqa::config::{Config, InitExistsError, ProviderConnection};
 use qqqa::history::read_recent_history;
 use qqqa::perms;
 use qqqa::prompt::{build_qa_system_prompt, build_qa_user_message, coalesce_prompt_inputs};
@@ -125,16 +125,33 @@ async fn main() -> Result<()> {
         }
     };
     if let Some(base) = cli.api_base.as_deref() {
-        eff.base_url = base.to_string();
+        if let Some(http) = eff.http_mut() {
+            http.base_url = base.to_string();
+        } else {
+            return Err(anyhow!(
+                "--api-base override is only supported for HTTP providers (current: '{}').",
+                eff.provider_key
+            ));
+        }
     }
     if let Some(temp) = cli.temperature {
         eff.temperature = Some(temp);
     }
     if cli.debug {
-        eprintln!(
-            "[debug] Using provider='{}' base_url='{}' model='{}'",
-            eff.provider_key, eff.base_url, eff.model
-        );
+        match &eff.connection {
+            ProviderConnection::Http(conn) => {
+                eprintln!(
+                    "[debug] Using provider='{}' base_url='{}' model='{}'",
+                    eff.provider_key, conn.base_url, eff.model
+                );
+            }
+            ProviderConnection::Cli(conn) => {
+                eprintln!(
+                    "[debug] Using provider='{}' cli_binary='{}' model='{}'",
+                    eff.provider_key, conn.binary, eff.model
+                );
+            }
+        }
     }
 
     let include_history = if cli.no_history {
@@ -169,15 +186,20 @@ async fn main() -> Result<()> {
         &task,
     );
 
-    let client = ChatClient::new(
-        eff.base_url.clone(),
-        eff.api_key.clone(),
-        eff.headers.clone(),
-        eff.tls.as_ref(),
-        eff.request_timeout_secs,
-    )?
-    .with_reasoning_effort(eff.reasoning_effort.clone())
-    .with_temperature(eff.temperature, eff.temperature.is_some());
+    let http_client = match &eff.connection {
+        ProviderConnection::Http(conn) => Some(
+            ChatClient::new(
+                conn.base_url.clone(),
+                conn.api_key.clone(),
+                conn.headers.clone(),
+                conn.tls.as_ref(),
+                conn.request_timeout_secs,
+            )?
+            .with_reasoning_effort(eff.reasoning_effort.clone())
+            .with_temperature(eff.temperature, eff.temperature.is_some()),
+        ),
+        ProviderConnection::Cli(_) => None,
+    };
     // Provide tool specs so the API can emit structured tool_calls instead of erroring.
     let tools_spec = serde_json::json!([
         {
@@ -233,23 +255,42 @@ async fn main() -> Result<()> {
         }
     ]);
 
-    let assistant_reply = client
-        .chat_once_messages_with_tools(
-            &eff.model,
-            &[
-                Msg {
-                    role: "system",
-                    content: &system_prompt,
-                },
-                Msg {
-                    role: "user",
-                    content: &user_msg,
-                },
-            ],
-            tools_spec,
-            cli.debug,
-        )
-        .await?;
+    let assistant_reply = match (&eff.connection, &http_client) {
+        (ProviderConnection::Http(_), Some(client)) => {
+            client
+                .chat_once_messages_with_tools(
+                    &eff.model,
+                    &[
+                        Msg {
+                            role: "system",
+                            content: &system_prompt,
+                        },
+                        Msg {
+                            role: "user",
+                            content: &user_msg,
+                        },
+                    ],
+                    tools_spec,
+                    cli.debug,
+                )
+                .await?
+        }
+        (ProviderConnection::Cli(cli_conn), _) => {
+            let text = run_cli_completion(CliCompletionRequest {
+                engine: cli_conn.engine,
+                binary: &cli_conn.binary,
+                base_args: &cli_conn.base_args,
+                system_prompt: &system_prompt,
+                user_prompt: &user_msg,
+                model: &eff.model,
+                reasoning_effort: eff.reasoning_effort.as_deref(),
+                debug: cli.debug,
+            })
+            .await?;
+            AssistantReply::Content(text)
+        }
+        _ => unreachable!("Provider/client mismatch"),
+    };
 
     match assistant_reply {
         AssistantReply::ToolCall {

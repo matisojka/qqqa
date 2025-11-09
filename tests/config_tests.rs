@@ -1,6 +1,6 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use fs_err as fs;
-use qqqa::config::Config;
+use qqqa::config::{Config, ProviderConnection};
 use serial_test::serial;
 use std::path::Path;
 use tempfile::tempdir;
@@ -53,8 +53,132 @@ fn local_provider_uses_placeholder_api_key_when_env_missing() {
     let eff = cfg
         .resolve_profile(Some("ollama"), None, None)
         .expect("ollama profile should resolve");
-    assert_eq!(eff.api_key, "qqqa-local-placeholder");
-    assert!(eff.is_local);
+    match eff.connection {
+        ProviderConnection::Http(ref conn) => {
+            assert_eq!(conn.api_key, "qqqa-local-placeholder");
+            assert!(conn.is_local);
+        }
+        _ => panic!("ollama should resolve to HTTP connection"),
+    }
+}
+
+#[test]
+#[serial]
+fn codex_profile_resolves_to_cli_backend() {
+    let cfg = Config::default();
+    let eff = cfg
+        .resolve_profile(Some("codex"), None, None)
+        .expect("codex profile should resolve");
+    match eff.connection {
+        ProviderConnection::Cli(ref conn) => {
+            assert_eq!(conn.binary, "codex");
+            assert_eq!(conn.base_args, vec!["exec".to_string()]);
+        }
+        _ => panic!("codex profile should resolve to CLI backend"),
+    }
+}
+
+#[test]
+fn cli_mode_inferred_from_cli_block_when_mode_missing() {
+    let json = r#"{
+        "default_profile": "codex",
+        "model_providers": {
+            "codex": {
+                "name": "Codex CLI",
+                "env_key": "CODEX_CLI_API_KEY",
+                "local": true,
+                "cli": {
+                    "engine": "codex",
+                    "binary": "codex",
+                    "base_args": ["exec"]
+                }
+            }
+        },
+        "profiles": {
+            "codex": {
+                "model_provider": "codex",
+                "model": "gpt-5"
+            }
+        }
+    }"#;
+    let cfg: Config = serde_json::from_str(json).expect("config parses");
+    let eff = cfg
+        .resolve_profile(Some("codex"), None, None)
+        .expect("profile resolves");
+    match eff.connection {
+        ProviderConnection::Cli(ref conn) => assert_eq!(conn.binary, "codex"),
+        _ => panic!("expected CLI provider"),
+    }
+}
+
+#[test]
+fn cli_mode_overrides_base_url_requirement() {
+    let json = r#"{
+        "default_profile": "codex",
+        "model_providers": {
+            "codex": {
+                "name": "Codex CLI",
+                "base_url": "https://example.com/ignored",
+                "env_key": "CODEX_CLI_API_KEY",
+                "local": true,
+                "mode": "cli",
+                "cli": {
+                    "engine": "codex",
+                    "binary": "codex",
+                    "base_args": ["exec"]
+                }
+            }
+        },
+        "profiles": {
+            "codex": {
+                "model_provider": "codex",
+                "model": "gpt-5"
+            }
+        }
+    }"#;
+    let cfg: Config = serde_json::from_str(json).expect("config parses");
+    let eff = cfg
+        .resolve_profile(Some("codex"), None, None)
+        .expect("profile resolves");
+    match eff.connection {
+        ProviderConnection::Cli(_) => {}
+        _ => panic!("expected CLI provider even with base_url present"),
+    }
+}
+
+#[test]
+fn cli_mode_does_not_require_base_url() {
+    let json = r#"{
+        "default_profile": "codex",
+        "model_providers": {
+            "codex": {
+                "name": "Codex CLI",
+                "base_url": "",
+                "env_key": "CODEX_CLI_API_KEY",
+                "local": true,
+                "mode": "cli",
+                "cli": {
+                    "engine": "codex",
+                    "binary": "codex",
+                    "base_args": ["exec"]
+                }
+            }
+        },
+        "profiles": {
+            "codex": {
+                "model_provider": "codex",
+                "model": "gpt-5"
+            }
+        }
+    }"#;
+    let cfg: Config = serde_json::from_str(json).expect("config parses");
+    let eff = cfg
+        .resolve_profile(Some("codex"), None, None)
+        .expect("profile resolves");
+    match eff.connection {
+        ProviderConnection::Cli(ref conn) => assert_eq!(conn.binary, "codex"),
+        _ => panic!("expected CLI provider even without base_url"),
+    }
 }
 
 #[test]

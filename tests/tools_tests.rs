@@ -4,7 +4,25 @@ use qqqa::tools::parse_tool_call;
 use qqqa::tools::read_file;
 use qqqa::tools::write_file;
 use serial_test::serial;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+struct TempCwdGuard {
+    previous: PathBuf,
+}
+
+impl TempCwdGuard {
+    fn new(dir: &Path) -> Self {
+        let previous = std::env::current_dir().expect("read current dir");
+        std::env::set_current_dir(dir).expect("set current dir");
+        Self { previous }
+    }
+}
+
+impl Drop for TempCwdGuard {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.previous);
+    }
+}
 
 #[test]
 #[serial]
@@ -15,7 +33,7 @@ fn read_and_write_file_tools_and_path_safety() {
     unsafe {
         std::env::set_var("HOME", temp.path());
     }
-    std::env::set_current_dir(temp.path()).unwrap();
+    let _cwd_guard = TempCwdGuard::new(temp.path());
 
     // write_file tool
     let out = write_file::run(write_file::Args {
@@ -87,7 +105,7 @@ async fn execute_command_runs_and_captures_output() {
     unsafe {
         std::env::set_var("HOME", temp.path());
     }
-    std::env::set_current_dir(temp.path()).unwrap();
+    let _cwd_guard = TempCwdGuard::new(temp.path());
 
     let res = qqqa::tools::execute_command::run(
         qqqa::tools::execute_command::Args {
@@ -113,7 +131,7 @@ async fn execute_command_honors_pty_force_flag() {
     unsafe {
         std::env::set_var("HOME", temp.path());
     }
-    std::env::set_current_dir(temp.path()).unwrap();
+    let _cwd_guard = TempCwdGuard::new(temp.path());
 
     let probe = "env sh -lc '[ -t 1 ] && echo tty || echo notty'";
     let baseline = qqqa::tools::execute_command::run(
@@ -165,7 +183,7 @@ async fn execute_command_respects_disable_flag() {
     unsafe {
         std::env::set_var("HOME", temp.path());
     }
-    std::env::set_current_dir(temp.path()).unwrap();
+    let _cwd_guard = TempCwdGuard::new(temp.path());
 
     let probe = "env sh -lc '[ -t 1 ] && echo tty || echo notty'";
     unsafe {
@@ -221,7 +239,7 @@ async fn execute_command_streams_stdout_chunks() {
     unsafe {
         std::env::set_var("HOME", temp.path());
     }
-    std::env::set_current_dir(temp.path()).unwrap();
+    let _cwd_guard = TempCwdGuard::new(temp.path());
 
     let mut seen = Vec::new();
     let mut printer = |chunk: qqqa::tools::execute_command::StreamChunk| {

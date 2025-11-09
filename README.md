@@ -13,7 +13,7 @@ The two binaries are:
 
 qqqa runs on macOS, Linux, and Windows.
 
-By default the repo includes profiles for OpenRouter (default), OpenAI, Groq, and a local Ollama runtime. An Anthropic profile stub exists in the config for future work but is not wired up yet.
+By default the repo includes profiles for OpenRouter (default), OpenAI, Groq, a local Ollama runtime, and the Codex CLI (so you can piggyback on a paid ChatGPT subscription). An Anthropic profile stub exists in the config for future work but is not wired up yet.
 
 
 
@@ -45,6 +45,33 @@ The tools may include transient context you choose to provide:
 OpenRouter mirrors the OpenAI Chat Completions API, adds generous community-hosted models, and keeps `openai/gpt-4.1-nano` fast and inexpensive. qqqa talks to `https://openrouter.ai/api/v1` out of the box and reads the API key from `OPENROUTER_API_KEY`, so your first run works as soon as you drop in a key.
 
 If you need even more throughput, the bundled `groq` profile that targets `openai/gpt-oss-20b` and `openai/gpt-oss-120b` remains available, and you can still add any OpenAI-compatible provider by editing `~/.qq/config.json` or creating a new profile.
+
+### Codex CLI profile (bring-your-own ChatGPT subscription)
+
+Already paying for ChatGPT? Select the `codex` profile (during `qq --init`, via `qq --profile codex`, or by editing `~/.qq/config.json`) and qqqa will shell out to the Codex CLI instead of hitting an HTTP endpoint. That lets you reuse an existing ChatGPT subscription with practically zero marginal cost.
+
+What to know:
+
+- Install the Codex CLI via the ChatGPT desktop app (Settings → Labs → Codex) or `pip install codex-cli`, then ensure `codex` is on your `PATH`.
+- Streaming is unavailable; even without `--no-stream`, qqqa buffers the Codex response and prints it once.
+- `qa` still expects JSON tool calls. When you need `read_file`, `write_file`, or `execute_command`, respond with `{ "tool": string, "arguments": object }` the same way you would on OpenRouter.
+- If the binary is missing or exits with an error, qqqa surfaces the stderr/stdout so you can fix your environment quickly.
+
+Example `~/.qq/config.json` fragment that pins Codex as the default profile:
+
+```json
+{
+  "default_profile": "codex",
+  "profiles": {
+    "codex": {
+      "model_provider": "codex",
+      "model": "gpt-5",
+      "reasoning_effort": "minimal"
+    }
+  }
+}
+```
+
 ## Features
 
 - OpenAI compatible API client with streaming and non streaming calls.
@@ -93,6 +120,7 @@ The initializer lets you choose the default provider:
 - OpenAI + `gpt-5-mini` (slower, a bit smarter)
 - Anthropic + `claude-3-5-sonnet-20241022` (placeholder until their Messages API finalizes)
 - Ollama (runs locally, adjust port if needed)
+- Codex CLI + `gpt-5` (wraps the `codex exec` binary so you can reuse a ChatGPT subscription; no API key needed, buffered output only)
 
 It also offers to store an API key in the config (optional). If you prefer environment variables, leave it blank and set one of:
 
@@ -100,6 +128,7 @@ It also offers to store an API key in the config (optional). If you prefer envir
 - `GROQ_API_KEY` for Groq
 - `OPENAI_API_KEY` for OpenAI
 - `OLLAMA_API_KEY` (optional; any non-empty string works—even `local`—because the Authorization header cannot be blank)
+- No API key is required for the Codex CLI profile—the ChatGPT desktop app or `codex` binary handles auth.
 
 Defaults written to `~/.qq/config.json`:
 
@@ -109,12 +138,14 @@ Defaults written to `~/.qq/config.json`:
   - `groq` → base `https://api.groq.com/openai/v1`, env `GROQ_API_KEY`
   - `ollama` → base `http://127.0.0.1:11434/v1`, env `OLLAMA_API_KEY` (qqqa auto-injects a non-empty placeholder if you leave it unset)
   - `anthropic` → base `https://api.anthropic.com/v1`, env `ANTHROPIC_API_KEY` (present in the config schema for future support; not usable yet)
+  - `codex` → CLI provider, binary `codex` - fails if the binary is missing
 - Profiles
   - `openrouter` → model `openai/gpt-4.1-nano` (default)
   - `openai` → model `gpt-5-mini`
   - `groq` → model `openai/gpt-oss-20b`
   - `ollama` → model `llama3.1`
   - `anthropic` → model `claude-3-5-sonnet-20241022` (inactive placeholder until Anthropic integration lands)
+  - `codex` → model label `gpt-5` (only used for display; Codex CLI picks the backing ChatGPT model)
 - Optional per-profile `reasoning_effort` for GPT-5 family models. If you leave it unset, qqqa sends `"reasoning_effort": "minimal"` for any `gpt-5*` model to keep responses fast. Set it to `"low"`, `"medium"`, or `"high"` when you want deeper reasoning.
 - (discouraged) Optional per-profile `temperature`. Most models default to `0.15` unless you set it in `~/.qq/config.json` or pass `--temperature <value>` for a single run. GPT-5 models ignore custom temperatures; qqqa forces them to `1.0`.
 - (discouraged): you can change the timeout, e.g. `"timeout": "240"` under a model profile in `~/.qq/config.json` to raise the per-request limit (`qq` + `qa` default to 180 s - this is SLOW; faster models are a better fix).
