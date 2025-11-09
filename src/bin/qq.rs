@@ -59,6 +59,10 @@ struct Cli {
     #[arg(long = "no-stream", action = ArgAction::SetTrue)]
     no_stream: bool,
 
+    /// Temperature for this run (overrides profile/default)
+    #[arg(long = "temperature")]
+    temperature: Option<f32>,
+
     /// Auto-copy the first recommended command for this run
     #[arg(
         long = "copy-command",
@@ -170,6 +174,9 @@ async fn main() -> Result<()> {
     if let Some(base) = cli.api_base.as_deref() {
         eff.base_url = base.to_string();
     }
+    if let Some(temp) = cli.temperature {
+        eff.temperature = Some(temp);
+    }
     if cli.debug {
         eprintln!(
             "[debug] Using provider='{}' base_url='{}' model='{}'",
@@ -219,7 +226,8 @@ async fn main() -> Result<()> {
         eff.tls.as_ref(),
         eff.request_timeout_secs,
     )?
-    .with_reasoning_effort(eff.reasoning_effort.clone());
+    .with_reasoning_effort(eff.reasoning_effort.clone())
+    .with_temperature(eff.temperature, eff.temperature.is_some());
 
     // Stream or buffered request per flag.
     if !cli.no_stream {

@@ -29,6 +29,10 @@ struct Cli {
     #[arg(short = 'm', long = "model")]
     model: Option<String>,
 
+    /// Temperature for this run (overrides profile/default)
+    #[arg(long = "temperature")]
+    temperature: Option<f32>,
+
     /// Disable terminal history context
     #[arg(short = 'n', long = "no-history", action = ArgAction::SetTrue)]
     no_history: bool,
@@ -123,6 +127,9 @@ async fn main() -> Result<()> {
     if let Some(base) = cli.api_base.as_deref() {
         eff.base_url = base.to_string();
     }
+    if let Some(temp) = cli.temperature {
+        eff.temperature = Some(temp);
+    }
     if cli.debug {
         eprintln!(
             "[debug] Using provider='{}' base_url='{}' model='{}'",
@@ -169,7 +176,8 @@ async fn main() -> Result<()> {
         eff.tls.as_ref(),
         eff.request_timeout_secs,
     )?
-    .with_reasoning_effort(eff.reasoning_effort.clone());
+    .with_reasoning_effort(eff.reasoning_effort.clone())
+    .with_temperature(eff.temperature, eff.temperature.is_some());
     // Provide tool specs so the API can emit structured tool_calls instead of erroring.
     let tools_spec = serde_json::json!([
         {
