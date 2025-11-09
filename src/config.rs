@@ -39,6 +39,7 @@ impl Default for ProviderMode {
 #[serde(rename_all = "snake_case")]
 pub enum CliEngine {
     Codex,
+    Claude,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,6 +206,23 @@ impl Default for Config {
                 }),
             },
         );
+        model_providers.insert(
+            "claude_cli".to_string(),
+            ModelProvider {
+                name: "Claude Code CLI".to_string(),
+                base_url: "cli://claude".to_string(),
+                env_key: "CLAUDE_CLI_API_KEY".to_string(),
+                api_key: None,
+                local: true,
+                tls: None,
+                mode: ProviderMode::Cli,
+                cli: Some(CliProviderConfig {
+                    engine: CliEngine::Claude,
+                    binary: "claude".to_string(),
+                    base_args: Vec::new(),
+                }),
+            },
+        );
 
         let mut profiles = HashMap::new();
         profiles.insert(
@@ -263,6 +281,16 @@ impl Default for Config {
                 model_provider: "codex".to_string(),
                 model: "gpt-5".to_string(),
                 reasoning_effort: Some("minimal".to_string()),
+                temperature: None,
+                timeout: None,
+            },
+        );
+        profiles.insert(
+            "claude_cli".to_string(),
+            Profile {
+                model_provider: "claude_cli".to_string(),
+                model: "sonnet".to_string(),
+                reasoning_effort: None,
                 temperature: None,
                 timeout: None,
             },
@@ -569,7 +597,10 @@ impl Config {
         println!(
             "  [6] Codex CLI — leverage the installed `codex` binary (uses your ChatGPT subscription)"
         );
-        print!("Enter 1, 2, 3, 4, 5, or 6 [1]: ");
+        println!(
+            "  [7] Claude Code CLI — use the local `claude` binary (Claude desktop / npm package)"
+        );
+        print!("Enter 1, 2, 3, 4, 5, 6, or 7 [1]: ");
         io::stdout().flush().ok();
         let mut choice = String::new();
         io::stdin().read_line(&mut choice).ok();
@@ -580,6 +611,9 @@ impl Config {
             "4" | "anthropic" => cfg.default_profile = "anthropic".to_string(),
             "5" | "ollama" => cfg.default_profile = "ollama".to_string(),
             "6" | "codex" => cfg.default_profile = "codex".to_string(),
+            "7" | "claude" | "claude-cli" | "claude_code" => {
+                cfg.default_profile = "claude_cli".to_string()
+            }
             "1" | "openrouter" => cfg.default_profile = "openrouter".to_string(),
             _ => cfg.default_profile = "openrouter".to_string(),
         }
@@ -643,19 +677,44 @@ impl Config {
                 }
             }
         } else {
-            let binary = cfg
+            let (binary, instructions, auth_note) = cfg
                 .model_providers
                 .get(&provider_key)
                 .and_then(|mp| mp.cli.as_ref())
                 .map(|cli| cli.binary.clone())
-                .unwrap_or_else(|| "codex".to_string());
-            println!(
-                "\n{} uses the '{}' CLI binary. Install Codex CLI (part of the ChatGPT desktop app or `pip install codex-cli`) and ensure it is on your PATH.",
-                provider.name, binary
-            );
-            println!(
-                "No API key is required; authentication happens through the Codex CLI itself."
-            );
+                .map(|bin| {
+                    let install = match provider_key.as_str() {
+                        "codex" => format!(
+                            "Install Codex CLI (ChatGPT desktop or `pip install codex-cli`) and ensure '{}' is on your PATH.",
+                            bin
+                        ),
+                        "claude_cli" => format!(
+                            "Install Claude Code (`npm install -g @anthropic-ai/claude-code`) so '{}' is available on your PATH.",
+                            bin
+                        ),
+                        _ => format!(
+                            "Ensure the '{}' CLI binary is installed and on your PATH.",
+                            bin
+                        ),
+                    };
+                    let auth = match provider_key.as_str() {
+                        "codex" => "No API key is required; the Codex CLI handles auth using your ChatGPT subscription.",
+                        "claude_cli" => "No API key is required; run `claude login` so the CLI can reuse your Claude subscription.",
+                        _ => "Authentication is handled by the CLI runtime itself.",
+                    }
+                    .to_string();
+                    (bin, install, auth)
+                })
+                .unwrap_or_else(|| {
+                    (
+                        "codex".to_string(),
+                        "Ensure the CLI binary is installed and on your PATH.".to_string(),
+                        "Authentication is handled by the CLI runtime itself.".to_string(),
+                    )
+                });
+            println!("\n{} uses the '{}' CLI binary.", provider.name, binary);
+            println!("{}", instructions);
+            println!("{}", auth_note);
         }
 
         println!("\nShare recent `qq` / `qa` commands with the model?");

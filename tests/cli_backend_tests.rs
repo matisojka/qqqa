@@ -4,7 +4,16 @@ use qqqa::ai::{CliCompletionRequest, run_cli_completion};
 use qqqa::config::CliEngine;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use tempfile::tempdir;
+
+fn read_args(path: &Path) -> Vec<String> {
+    let data = fs::read(path).expect("args file");
+    data.split(|b| *b == 0)
+        .filter(|chunk| !chunk.is_empty())
+        .map(|chunk| String::from_utf8_lossy(chunk).to_string())
+        .collect()
+}
 
 #[tokio::test]
 async fn run_cli_completion_returns_agent_message_from_script() {
@@ -45,7 +54,7 @@ async fn run_cli_completion_writes_tagged_prompts_to_stdin() {
         r#"#!/bin/sh
 set -eu
 DIR="$(dirname "$0")"
-printf '%s\n' "$@" > "{args}"
+printf '%s\0' "$@" > "{args}"
 cat > "{prompt}"
 printf '%s\n' '{{"type":"item.completed","item":{{"type":"agent_message","text":"ok"}}}}'
 "#,
@@ -73,24 +82,78 @@ printf '%s\n' '{{"type":"item.completed","item":{{"type":"agent_message","text":
 
     assert_eq!(text.trim(), "ok");
 
-    let args_contents = fs::read_to_string(&args_dump).expect("args file");
-    let args: Vec<&str> = args_contents.lines().collect();
-    assert_eq!(
-        args,
-        vec![
-            "exec",
-            "--json",
-            "-c",
-            "model_reasoning_effort=minimal",
-            "-c",
-            "sandbox_mode=read-only",
-            "-c",
-            "tools.web_search=false",
-            "-",
-        ]
-    );
+    let args = read_args(&args_dump);
+    let expected: Vec<String> = vec![
+        "exec",
+        "--json",
+        "-c",
+        "model_reasoning_effort=minimal",
+        "-c",
+        "sandbox_mode=read-only",
+        "-c",
+        "tools.web_search=false",
+        "-",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    assert_eq!(args, expected);
 
     let prompt_contents = fs::read_to_string(&prompt_dump).expect("prompt file");
-    let expected_prompt = "<system-prompt>\nSYSTEM\n</system-prompt>\n\n<user-prompt>\nUSER\n</user-prompt>\n";
+    let expected_prompt =
+        "<system-prompt>\nSYSTEM\n</system-prompt>\n\n<user-prompt>\nUSER\n</user-prompt>\n";
     assert_eq!(prompt_contents, expected_prompt);
+}
+
+#[tokio::test]
+async fn run_cli_completion_invokes_claude_with_expected_args() {
+    let dir = tempdir().unwrap();
+    let script_path = dir.path().join("fake_claude");
+    let args_dump = dir.path().join("claude_args.txt");
+    let script = format!(
+        r#"#!/bin/sh
+set -eu
+printf '%s\0' "$@" > "{args}"
+printf '%s' '{{"type":"result","subtype":"success","result":"<cmd>echo hi</cmd>"}}'
+"#,
+        args = args_dump.display()
+    );
+    fs::write(&script_path, script).unwrap();
+    let mut perms = fs::metadata(&script_path).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms).unwrap();
+
+    let text = run_cli_completion(CliCompletionRequest {
+        engine: CliEngine::Claude,
+        binary: script_path.to_str().unwrap(),
+        base_args: &[],
+        system_prompt: "SYSTEM",
+        user_prompt: "USER",
+        model: "sonnet",
+        reasoning_effort: None,
+        debug: false,
+    })
+    .await
+    .expect("cli run succeeds");
+
+    assert_eq!(text, "<cmd>echo hi</cmd>");
+
+    let args = read_args(&args_dump);
+    let expected: Vec<String> = vec![
+        "-p",
+        "--output-format",
+        "json",
+        "--model",
+        "sonnet",
+        "--append-system-prompt",
+        "<system-prompt>\nSYSTEM\n</system-prompt>",
+        "--disallowed-tools",
+        "Bash(*) Edit",
+        "--",
+        "<user-prompt>\nUSER\n</user-prompt>",
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
+    assert_eq!(args, expected);
 }

@@ -5,16 +5,23 @@ use qqqa::tools::read_file;
 use qqqa::tools::write_file;
 use serial_test::serial;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 struct TempCwdGuard {
     previous: PathBuf,
+    _lock: MutexGuard<'static, ()>,
 }
 
 impl TempCwdGuard {
     fn new(dir: &Path) -> Self {
+        static CWD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let lock = CWD_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
         let previous = std::env::current_dir().expect("read current dir");
         std::env::set_current_dir(dir).expect("set current dir");
-        Self { previous }
+        Self {
+            previous,
+            _lock: lock,
+        }
     }
 }
 

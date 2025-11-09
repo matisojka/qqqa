@@ -594,6 +594,7 @@ mod cli_backend {
     pub async fn run_cli_completion(req: CliCompletionRequest<'_>) -> Result<String> {
         match req.engine {
             CliEngine::Codex => run_codex(req).await,
+            CliEngine::Claude => run_claude(req).await,
         }
     }
 
@@ -614,13 +615,11 @@ mod cli_backend {
         cmd.arg("tools.web_search=false");
         cmd.arg("-");
 
-        let mut prompt = String::new();
-        prompt.push_str("<system-prompt>\n");
-        prompt.push_str(req.system_prompt);
-        prompt.push_str("\n</system-prompt>\n\n");
-        prompt.push_str("<user-prompt>\n");
-        prompt.push_str(req.user_prompt);
-        prompt.push_str("\n</user-prompt>\n");
+        let prompt = format!(
+            "{}\n\n{}\n",
+            tagged_system_prompt(req.system_prompt),
+            tagged_user_prompt(req.user_prompt)
+        );
 
         if req.debug {
             eprintln!(
@@ -678,6 +677,75 @@ mod cli_backend {
         parse_codex_response(&stdout)
     }
 
+    async fn run_claude(req: CliCompletionRequest<'_>) -> Result<String> {
+        let mut cmd = Command::new(req.binary);
+        if !req.base_args.is_empty() {
+            cmd.args(req.base_args.iter().filter(|arg| !arg.trim().is_empty()));
+        }
+        let user_prompt = tagged_user_prompt(req.user_prompt);
+        let system_prompt = tagged_system_prompt(req.system_prompt);
+
+        cmd.arg("-p");
+        cmd.arg("--output-format");
+        cmd.arg("json");
+        if !req.model.trim().is_empty() {
+            cmd.arg("--model");
+            cmd.arg(req.model);
+        }
+        cmd.arg("--append-system-prompt");
+        cmd.arg(&system_prompt);
+        cmd.arg("--disallowed-tools");
+        cmd.arg("Bash(*) Edit");
+        cmd.arg("--");
+        cmd.arg(&user_prompt);
+
+        if req.debug {
+            eprintln!(
+                "[debug] Running CLI provider '{}' with args: {:?}",
+                req.binary, cmd
+            );
+        }
+
+        let output = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to spawn CLI provider '{}'. Is it installed and on your PATH?",
+                    req.binary
+                )
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return Err(anyhow!(
+                "CLI provider '{}' exited with status {}.{}{}",
+                req.binary,
+                output
+                    .status
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "signal".to_string()),
+                if stdout.trim().is_empty() {
+                    "".to_string()
+                } else {
+                    format!("\nstdout: {}", stdout.trim())
+                },
+                if stderr.trim().is_empty() {
+                    "".to_string()
+                } else {
+                    format!("\nstderr: {}", stderr.trim())
+                }
+            ));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        parse_claude_response(&stdout)
+    }
+
     #[derive(Debug, Deserialize)]
     struct CodexEvent {
         #[serde(rename = "type")]
@@ -726,9 +794,103 @@ mod cli_backend {
         Ok(messages.join("\n\n"))
     }
 
+    fn parse_claude_response(stdout: &str) -> Result<String> {
+        let value = parse_single_json_value(stdout)
+            .with_context(|| "CLI provider returned non-JSON output")?;
+
+        if let Some(result_field) = value.get("result") {
+            if let Some(text) = extract_text(result_field) {
+                return Ok(text);
+            }
+        }
+
+        if let Some(text) = extract_text(&value) {
+            return Ok(text);
+        }
+
+        Err(anyhow!(
+            "CLI provider returned JSON without a usable message."
+        ))
+    }
+
+    fn parse_single_json_value(stdout: &str) -> Result<Value> {
+        let trimmed = stdout.trim();
+        if !trimmed.is_empty() {
+            if let Ok(value) = serde_json::from_str::<Value>(trimmed) {
+                return Ok(value);
+            }
+        }
+
+        for line in stdout.lines().rev() {
+            let candidate = line.trim();
+            if candidate.is_empty() {
+                continue;
+            }
+            if let Ok(value) = serde_json::from_str::<Value>(candidate) {
+                return Ok(value);
+            }
+        }
+
+        Err(anyhow!("Unable to parse CLI JSON output"))
+    }
+
+    fn extract_text(value: &Value) -> Option<String> {
+        match value {
+            Value::String(s) => {
+                if s.trim().is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
+            }
+            Value::Array(items) => {
+                let mut parts = Vec::new();
+                for item in items {
+                    if let Some(text) = extract_text(item) {
+                        parts.push(text);
+                    }
+                }
+                if parts.is_empty() {
+                    None
+                } else {
+                    Some(parts.join("\n\n"))
+                }
+            }
+            Value::Object(map) => {
+                if let Some(text) = map.get("text").and_then(|t| t.as_str()) {
+                    if !text.trim().is_empty() {
+                        return Some(text.to_string());
+                    }
+                }
+                for key in ["content", "messages", "output_text", "result"] {
+                    if let Some(val) = map.get(key) {
+                        if let Some(text) = extract_text(val) {
+                            return Some(text);
+                        }
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn tagged_system_prompt(prompt: &str) -> String {
+        format!("<system-prompt>\n{}\n</system-prompt>", prompt)
+    }
+
+    fn tagged_user_prompt(prompt: &str) -> String {
+        format!("<user-prompt>\n{}\n</user-prompt>", prompt)
+    }
+
     #[cfg(test)]
     pub(super) fn parse_codex_response_for_test(input: &str) -> Result<String> {
         parse_codex_response(input)
+    }
+
+    #[cfg(test)]
+    pub(super) fn parse_claude_response_for_test(input: &str) -> Result<String> {
+        parse_claude_response(input)
     }
 }
 
@@ -736,7 +898,7 @@ pub use cli_backend::{CliCompletionRequest, run_cli_completion};
 
 #[cfg(test)]
 mod tests {
-    use super::cli_backend::parse_codex_response_for_test;
+    use super::cli_backend::{parse_claude_response_for_test, parse_codex_response_for_test};
     use super::load_root_certificates;
     use rcgen::{CertifiedKey, generate_simple_self_signed};
     use std::fs;
@@ -777,5 +939,19 @@ mod tests {
         let merged = payload.replace('\n', "\n");
         let parsed = parse_codex_response_for_test(&merged).expect("parse");
         assert_eq!(parsed, "First\n\nSecond");
+    }
+
+    #[test]
+    fn claude_parser_reads_result_string() {
+        let payload = r#"{"type":"result","subtype":"success","result":"<cmd>echo hi</cmd>"}"#;
+        let parsed = parse_claude_response_for_test(payload).expect("parse");
+        assert_eq!(parsed, "<cmd>echo hi</cmd>");
+    }
+
+    #[test]
+    fn claude_parser_walks_nested_messages() {
+        let payload = r#"{"type":"result","subtype":"success","result":{"messages":[{"content":[{"type":"text","text":"Hello"},{"type":"text","text":"World"}]}]}}"#;
+        let parsed = parse_claude_response_for_test(payload).expect("parse");
+        assert_eq!(parsed, "Hello\n\nWorld");
     }
 }

@@ -79,6 +79,22 @@ fn codex_profile_resolves_to_cli_backend() {
 }
 
 #[test]
+#[serial]
+fn claude_cli_profile_resolves_to_cli_backend() {
+    let cfg = Config::default();
+    let eff = cfg
+        .resolve_profile(Some("claude_cli"), None, None)
+        .expect("claude_cli profile should resolve");
+    match eff.connection {
+        ProviderConnection::Cli(ref conn) => {
+            assert_eq!(conn.binary, "claude");
+            assert!(conn.base_args.is_empty());
+        }
+        _ => panic!("claude_cli profile should resolve to CLI backend"),
+    }
+}
+
+#[test]
 fn cli_mode_inferred_from_cli_block_when_mode_missing() {
     let json = r#"{
         "default_profile": "codex",

@@ -13,7 +13,7 @@ The two binaries are:
 
 qqqa runs on macOS, Linux, and Windows.
 
-By default the repo includes profiles for OpenRouter (default), OpenAI, Groq, a local Ollama runtime, and the Codex CLI (so you can piggyback on a paid ChatGPT subscription). An Anthropic profile stub exists in the config for future work but is not wired up yet.
+By default the repo includes profiles for OpenRouter (default), OpenAI, Groq, a local Ollama runtime, the Codex CLI (piggyback on ChatGPT), and the Claude Code CLI (reuse your Claude subscription). An Anthropic profile stub exists in the config for future work but is not wired up yet.
 
 
 
@@ -72,6 +72,31 @@ Example `~/.qq/config.json` fragment that pins Codex as the default profile:
 }
 ```
 
+### Claude Code CLI profile (bring-your-own Claude desktop subscription)
+
+Prefer Claude’s coding workflow? Select the `claude_cli` profile and qqqa will drive the `claude` binary from `@anthropic-ai/claude-code` instead of a hosted API. That keeps usage effectively free if you already pay for Claude for Desktop.
+
+What to know:
+
+- Install Claude Code (`npm install -g @anthropic-ai/claude-code`) or use the desktop auto-updater so the `claude` binary is on your `PATH`, then run `claude login` once.
+- Streaming is unavailable; even without `--no-stream`, qqqa buffers Claude’s response and prints it once (matching the Codex behavior).
+- qqqa passes `--disallowed-tools "Bash(*) Edit"` so Claude cannot run commands or edit files—it must respond with the same XML-ish suggestions as HTTP providers.
+- `qa` still expects JSON tool calls and enforces the same `read_file` / `write_file` / `execute_command` schema.
+
+Minimal config snippet:
+
+```json
+{
+  "default_profile": "claude_cli",
+  "profiles": {
+    "claude_cli": {
+      "model_provider": "claude_cli",
+      "model": "sonnet"
+    }
+  }
+}
+```
+
 ## Features
 
 - OpenAI compatible API client with streaming and non streaming calls.
@@ -121,6 +146,7 @@ The initializer lets you choose the default provider:
 - Anthropic + `claude-3-5-sonnet-20241022` (placeholder until their Messages API finalizes)
 - Ollama (runs locally, adjust port if needed)
 - Codex CLI + `gpt-5` (wraps the `codex exec` binary so you can reuse a ChatGPT subscription; no API key needed, buffered output only)
+- Claude Code CLI + `sonnet` (wraps the `claude` binary; no API key needed, buffered output only)
 
 It also offers to store an API key in the config (optional). If you prefer environment variables, leave it blank and set one of:
 
@@ -128,7 +154,7 @@ It also offers to store an API key in the config (optional). If you prefer envir
 - `GROQ_API_KEY` for Groq
 - `OPENAI_API_KEY` for OpenAI
 - `OLLAMA_API_KEY` (optional; any non-empty string works—even `local`—because the Authorization header cannot be blank)
-- No API key is required for the Codex CLI profile—the ChatGPT desktop app or `codex` binary handles auth.
+- No API key is required for the Codex or Claude CLI profiles—their binaries handle auth (`codex login` / `claude login`).
 
 Defaults written to `~/.qq/config.json`:
 
@@ -138,6 +164,8 @@ Defaults written to `~/.qq/config.json`:
   - `groq` → base `https://api.groq.com/openai/v1`, env `GROQ_API_KEY`
   - `ollama` → base `http://127.0.0.1:11434/v1`, env `OLLAMA_API_KEY` (qqqa auto-injects a non-empty placeholder if you leave it unset)
   - `anthropic` → base `https://api.anthropic.com/v1`, env `ANTHROPIC_API_KEY` (present in the config schema for future support; not usable yet)
+  - `codex` → mode `cli`, binary `codex` with base args `exec` (install Codex CLI; auth handled by `codex login`)
+  - `claude_cli` → mode `cli`, binary `claude` (install `@anthropic-ai/claude-code`; auth handled by `claude login`)
   - `codex` → CLI provider, binary `codex` - fails if the binary is missing
 - Profiles
   - `openrouter` → model `openai/gpt-4.1-nano` (default)
