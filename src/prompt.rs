@@ -44,6 +44,7 @@ pub fn coalesce_prompt_inputs(args_question: String, stdin_block: Option<String>
 /// - Trailing line: `Question: <text>`
 pub fn build_qq_prompt(
     os: Option<OsType>,
+    shell_hint: Option<&str>,
     history: &[String],
     stdin_block: Option<&str>,
     question: &str,
@@ -55,10 +56,14 @@ pub fn build_qq_prompt(
 
     let mut out = String::new();
     out.push_str(&format!(
-        "Timestamp (UTC): {}\nOS: {}\n\n",
+        "Timestamp (UTC): {}\nOS: {}\n",
         now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         os_name
     ));
+    if let Some(shell) = shell_hint {
+        out.push_str(&format!("Default Shell: {}\n", shell));
+    }
+    out.push('\n');
 
     if !history.is_empty() {
         out.push_str("Terminal History (last commands):\n");
@@ -125,13 +130,14 @@ pub fn build_qq_system_prompt() -> String {
     s.push_str("- Be concise and practical\n");
     s.push_str("- Prefer tools that are typically pre-installed on macOS/Linux (POSIX utilities like ls, find, grep, awk, sed, xargs, tar, curl, ssh). Optimize for portability.\n");
     s.push_str("- You MAY suggest non-default tools (e.g., ripgrep, fd, bat, tree) only if they are notably better; when you do, include an install hint for the detected OS (e.g., <cmd>brew install ripgrep</cmd> on macOS, <cmd>sudo apt-get install ripgrep</cmd> on Debian/Ubuntu) and ALSO provide a built-in alternative.\n");
-    s.push_str("- Tailor flags/commands to the provided Operating System in the user message (macOS vs Linux differences).\n");
+    s.push_str("- Tailor flags/commands to the provided Operating System AND Default Shell in the user message (POSIX sh vs Windows cmd.exe vs Windows PowerShell behave differently).\n");
     s
 }
 
 /// User prompt for `qq` per the documented template (timestamp/OS/history/stdin/question).
 pub fn build_qq_user_message(
     os: Option<OsType>,
+    shell_hint: Option<&str>,
     history: &[String],
     stdin_block: Option<&str>,
     question: &str,
@@ -146,7 +152,11 @@ pub fn build_qq_user_message(
         "Current date/time: {}\n",
         now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
     ));
-    out.push_str(&format!("Operating System: {}\n\n", os_name));
+    out.push_str(&format!("Operating System: {}\n", os_name));
+    if let Some(shell) = shell_hint {
+        out.push_str(&format!("Default Shell: {}\n", shell));
+    }
+    out.push('\n');
 
     if !history.is_empty() {
         out.push_str("[Recent terminal commands for context (sanitized for privacy):\n");
@@ -197,9 +207,10 @@ pub fn build_qa_system_prompt() -> String {
 /// Build the user message for `qa`: includes timestamp, OS, optional history and stdin context, plus the task.
 pub fn build_qa_user_message(
     os: Option<OsType>,
+    shell_hint: Option<&str>,
     history: &[String],
     stdin_block: Option<&str>,
     task: &str,
 ) -> String {
-    build_qq_prompt(os, history, stdin_block, task)
+    build_qq_prompt(os, shell_hint, history, stdin_block, task)
 }

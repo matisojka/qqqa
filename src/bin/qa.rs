@@ -5,6 +5,7 @@ use qqqa::config::{Config, InitExistsError};
 use qqqa::history::read_recent_history;
 use qqqa::perms;
 use qqqa::prompt::{build_qa_system_prompt, build_qa_user_message, coalesce_prompt_inputs};
+use qqqa::shell::{ShellKind, detect_shell, shell_hint_for_prompt};
 use qqqa::tools::{ToolCall, parse_tool_call};
 use std::io::{Read, Stdin, Write};
 use std::path::{Path, PathBuf};
@@ -141,12 +142,21 @@ async fn main() -> Result<()> {
     } else {
         Vec::new()
     };
+    let os_details = os_info::get();
+    let os_type = os_details.os_type();
+    let shell_kind = detect_shell(os_type);
+    if cli.debug {
+        eprintln!("[debug] Inferred shell: {}", shell_kind.display_name(),);
+    }
+
     let mut system_prompt = build_qa_system_prompt();
     if cfg.no_emoji_enabled() {
         system_prompt.push_str("\nHard rule: You MUST NOT use emojis anywhere in the response.\n");
     }
+    let shell_hint = shell_hint_for_prompt(shell_kind);
     let user_msg = build_qa_user_message(
-        Some(os_info::get().os_type()),
+        Some(os_type),
+        Some(shell_hint),
         &history,
         stdin_block.as_deref(),
         &task,
@@ -243,6 +253,7 @@ async fn main() -> Result<()> {
                 &arguments_json,
                 cli.yes,
                 cli.debug,
+                shell_kind,
                 &mut cfg,
                 &path,
             )
@@ -264,7 +275,7 @@ async fn main() -> Result<()> {
                         Err(e) => print_tool_error("write_file", &e.to_string()),
                     },
                     ToolCall::ExecuteCommand(args) => match run_execute_command_with_allowlist(
-                        args, cli.yes, cli.debug, &mut cfg, &path,
+                        args, cli.yes, cli.debug, shell_kind, &mut cfg, &path,
                     )
                     .await
                     {
@@ -286,6 +297,7 @@ async fn run_execute_command_with_allowlist(
     args: qqqa::tools::execute_command::Args,
     auto_yes: bool,
     debug: bool,
+    shell: ShellKind,
     cfg: &mut Config,
     cfg_path: &Path,
 ) -> Result<String> {
@@ -314,6 +326,7 @@ async fn run_execute_command_with_allowlist(
             exec_args,
             auto_yes,
             debug,
+            shell,
             Some(&mut stream_printer),
         )
         .await
@@ -438,6 +451,7 @@ async fn execute_tool_call(
     arguments_json: &str,
     auto_yes: bool,
     debug: bool,
+    shell: ShellKind,
     cfg: &mut Config,
     cfg_path: &Path,
 ) -> Result<bool> {
@@ -467,7 +481,10 @@ async fn execute_tool_call(
             "execute_command" => {
                 let args: qqqa::tools::execute_command::Args = serde_json::from_str(&current_args)
                     .map_err(|e| anyhow!("Failed to parse execute_command args: {}", e))?;
-                match run_execute_command_with_allowlist(args, auto_yes, debug, cfg, cfg_path).await
+                match run_execute_command_with_allowlist(
+                    args, auto_yes, debug, shell, cfg, cfg_path,
+                )
+                .await
                 {
                     Ok(summary) => print_tool_result("execute_command", &summary),
                     Err(e) => print_tool_error("execute_command", &e.to_string()),
@@ -539,6 +556,7 @@ mod tests {
             &payload.to_string(),
             false,
             false,
+            ShellKind::Posix,
             &mut cfg,
             &cfg_path,
         )
@@ -575,6 +593,7 @@ mod tests {
             &payload.to_string(),
             false,
             false,
+            ShellKind::Posix,
             &mut cfg,
             &cfg_path,
         )

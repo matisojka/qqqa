@@ -53,8 +53,10 @@ fn history_reader_prefers_existing_files_and_limits() {
 fn prompt_builders_include_sections() {
     let hist = vec!["cmd1".to_string(), "cmd2".to_string()];
     let stdin_block = Some("input text\nline2");
+    let shell_hint = Some("POSIX sh");
     let qq = build_qq_prompt(
         Some(os_info::get().os_type()),
+        shell_hint,
         &hist,
         stdin_block,
         "What is Rust?",
@@ -67,6 +69,7 @@ fn prompt_builders_include_sections() {
     assert!(sys.contains("Available tools"));
     let user = build_qa_user_message(
         Some(os_info::get().os_type()),
+        shell_hint,
         &hist,
         stdin_block,
         "Do the thing",
@@ -87,8 +90,10 @@ fn coalesce_prompt_inputs_uses_piped_text_when_args_empty() {
     assert_eq!(question, "Show me the full contents of this directory");
     assert!(stdin_block.is_none());
 
+    let shell_hint = Some("POSIX sh");
     let prompt = qqqa::prompt::build_qq_prompt(
         Some(os_info::get().os_type()),
+        shell_hint,
         &[],
         stdin_block.as_deref(),
         &question,

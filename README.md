@@ -11,6 +11,8 @@ The two binaries are:
 - `qq` - ask a single question, e.g. "qq how can I recursively list all files in this directory" (qq stands for "quick question")
 - `qa` - a single step agent that can optionally use tools to finish a task: read a file, write a file, or execute a command with confirmation (qa stands for "quick agent")
 
+qqqa runs on macOS, Linux, and Windows.
+
 By default the repo includes profiles for OpenRouter (default), OpenAI, Groq, and a local Ollama runtime. An Anthropic profile stub exists in the config for future work but is not wired up yet.
 
 
@@ -66,6 +68,10 @@ brew install qqqa
 ### Linux
 
 Download a prebuilt archive from the [GitHub Releases](https://github.com/iagooar/qqqa/releases) page, extract it, and place `qq`/`qa` somewhere on your `PATH` (e.g., `/usr/local/bin`).
+
+### Windows
+
+Download the Windows archive from Releases (choose the architecture that matches your machine), extract `qq.exe` and `qa.exe`, and add them to your `%PATH%`.
 
 ## Configure
 
@@ -132,7 +138,6 @@ Example override in `~/.qq/config.json`:
 ### Terminal history
 
 Terminal history is **off by default**. During `qq --init` / `qa --init` you can opt in to sending the last 10 `qq`/`qa` commands along with each request. You can still override per run with `--history` (force on) or `-n/--no-history` (force off). Only commands whose first token is `qq` or `qa` are ever shared.
-
 
 ## Usage
 
@@ -247,13 +252,16 @@ qa --history "trace which git commands I ran recently"
 
 # disable emojis in responses (persists)
 qa --no-fun "format and lint the repo"
+
+# run qa non-interactively with confirmation already granted
+qa -y "count lines across *.rs"
 ```
 
 When qa runs a command while stdout is a terminal, output now streams live; the structured `[tool:execute_command]` summary still prints afterward for easy copying.
 
 `execute_command` prints the proposed command and asks for confirmation. It warns if the working directory is outside your home. Use `-y` to auto approve in trusted workflows.
 
-The runner enforces a default allowlist (think `ls`, `grep`, `find`, `rg`, `awk`, etc.) and rejects pipelines, redirection, and other high-risk constructs. When a command is blocked, `qa` prompts you to add it to `command_allowlist` inside `~/.qq/config.json`; approving once persists the choice and updates future runs.
+The runner enforces a default allowlist (think `ls`, `grep`, `find`, `rg`, `awk`, etc.) and rejects pipelines, redirection, and other high-risk constructs. When a command is blocked, `qa` prompts you to add it to `command_allowlist` inside `~/.qq/config.json`; approving once persists the choice and updates future runs. On Windows it automatically adapts to the active environment so built-ins like `dir` or `Get-ChildItem` keep working without extra flags.
 
 ## Advanced features and configurations
 
