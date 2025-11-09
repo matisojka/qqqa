@@ -1,6 +1,8 @@
 use anyhow::{Result, anyhow};
 use clap::{ArgAction, Parser};
-use qqqa::ai::{ChatClient, CliCompletionRequest, Msg, run_cli_completion};
+use qqqa::ai::{
+    ChatClient, CliCompletionRequest, Msg, run_cli_completion, run_cli_completion_streaming,
+};
 use qqqa::clipboard;
 use qqqa::config::{Config, InitExistsError, ProviderConnection};
 use qqqa::formatting::{
@@ -309,14 +311,7 @@ async fn main() -> Result<()> {
             }
         }
         (ProviderConnection::Cli(cli_conn), _) => {
-            if !cli.no_stream && cli.debug {
-                eprintln!(
-                    "[debug] CLI provider '{}' does not support streaming; buffering output.",
-                    eff.provider_key
-                );
-            }
-            let loading = start_loading_animation();
-            let response = run_cli_completion(CliCompletionRequest {
+            let make_request = || CliCompletionRequest {
                 engine: cli_conn.engine,
                 binary: &cli_conn.binary,
                 base_args: &cli_conn.base_args,
@@ -325,12 +320,60 @@ async fn main() -> Result<()> {
                 model: &eff.model,
                 reasoning_effort: eff.reasoning_effort.as_deref(),
                 debug: cli.debug,
-            })
-            .await?;
-            drop(loading);
-            println!("");
-            print_assistant_text(&response, cli.raw);
-            maybe_copy_first_command(&response, copy_enabled, cli.raw, cli.debug);
+            };
+
+            let streaming_enabled = !cli.no_stream && cli_conn.engine.supports_streaming();
+
+            if streaming_enabled {
+                println!("");
+                if cli.raw {
+                    let mut collected = String::new();
+                    let fallback = run_cli_completion_streaming(make_request(), |tok| {
+                        collected.push_str(tok);
+                        print_stream_token(tok);
+                    })
+                    .await?;
+                    if collected.is_empty() {
+                        collected = fallback;
+                    }
+                    println!("");
+                    maybe_copy_first_command(&collected, copy_enabled, cli.raw, cli.debug);
+                } else {
+                    let mut formatter = StreamingFormatter::new();
+                    let mut writer = PrettyStreamWriter::new();
+                    let mut collected = String::new();
+                    let fallback = run_cli_completion_streaming(make_request(), |tok| {
+                        collected.push_str(tok);
+                        if let Some(delta) = formatter.push(tok) {
+                            writer.write(&delta);
+                        }
+                    })
+                    .await?;
+                    if let Some(tail) = formatter.flush() {
+                        if !tail.is_empty() {
+                            writer.write(&tail);
+                        }
+                    }
+                    if collected.is_empty() {
+                        collected = fallback;
+                    }
+                    println!("");
+                    maybe_copy_first_command(&collected, copy_enabled, cli.raw, cli.debug);
+                }
+            } else {
+                if !cli.no_stream && cli.debug {
+                    eprintln!(
+                        "[debug] CLI provider '{}' does not support streaming; buffering output.",
+                        eff.provider_key
+                    );
+                }
+                let loading = start_loading_animation();
+                let response = run_cli_completion(make_request()).await?;
+                drop(loading);
+                println!("");
+                print_assistant_text(&response, cli.raw);
+                maybe_copy_first_command(&response, copy_enabled, cli.raw, cli.debug);
+            }
         }
         _ => unreachable!("Provider/client mismatch"),
     }
