@@ -576,7 +576,7 @@ fn find_single_newline(buf: &[u8]) -> Option<usize> {
 mod cli_backend {
     use super::*;
     use std::process::Stdio;
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::process::Command;
 
     #[derive(Debug)]
@@ -595,6 +595,22 @@ mod cli_backend {
         match req.engine {
             CliEngine::Codex => run_codex(req).await,
             CliEngine::Claude => run_claude(req).await,
+        }
+    }
+
+    pub async fn run_cli_completion_streaming<F>(
+        req: CliCompletionRequest<'_>,
+        on_token: F,
+    ) -> Result<String>
+    where
+        F: FnMut(&str) + Send,
+    {
+        match req.engine {
+            CliEngine::Claude => run_claude_streaming(req, on_token).await,
+            CliEngine::Codex => Err(anyhow!(
+                "CLI provider '{}' does not support streaming",
+                req.binary
+            )),
         }
     }
 
@@ -678,26 +694,7 @@ mod cli_backend {
     }
 
     async fn run_claude(req: CliCompletionRequest<'_>) -> Result<String> {
-        let mut cmd = Command::new(req.binary);
-        if !req.base_args.is_empty() {
-            cmd.args(req.base_args.iter().filter(|arg| !arg.trim().is_empty()));
-        }
-        let user_prompt = tagged_user_prompt(req.user_prompt);
-        let system_prompt = tagged_system_prompt(req.system_prompt);
-
-        cmd.arg("-p");
-        cmd.arg("--output-format");
-        cmd.arg("json");
-        if !req.model.trim().is_empty() {
-            cmd.arg("--model");
-            cmd.arg(req.model);
-        }
-        cmd.arg("--append-system-prompt");
-        cmd.arg(&system_prompt);
-        cmd.arg("--disallowed-tools");
-        cmd.arg("Bash(*) Edit");
-        cmd.arg("--");
-        cmd.arg(&user_prompt);
+        let mut cmd = build_claude_command(&req, false);
 
         if req.debug {
             eprintln!(
@@ -744,6 +741,144 @@ mod cli_backend {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         parse_claude_response(&stdout)
+    }
+
+    async fn run_claude_streaming<F>(
+        req: CliCompletionRequest<'_>,
+        mut on_token: F,
+    ) -> Result<String>
+    where
+        F: FnMut(&str) + Send,
+    {
+        let mut cmd = build_claude_command(&req, true);
+
+        if req.debug {
+            eprintln!(
+                "[debug] Running CLI provider '{}' with args: {:?}",
+                req.binary, cmd
+            );
+        }
+
+        let mut child = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| {
+                format!(
+                    "Failed to spawn CLI provider '{}'. Is it installed and on your PATH?",
+                    req.binary
+                )
+            })?;
+
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("CLI provider '{}' did not expose stdout", req.binary))?;
+        let stderr = child.stderr.take().map(|stderr| {
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stderr);
+                let mut buf = Vec::new();
+                reader.read_to_end(&mut buf).await.ok();
+                String::from_utf8_lossy(&buf).trim().to_string()
+            })
+        });
+
+        let mut reader = BufReader::new(stdout).lines();
+        let mut aggregated = String::new();
+        let mut fallback = None;
+
+        while let Some(line) = reader.next_line().await? {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            match parse_claude_stream_line(trimmed) {
+                Ok((token, result_text)) => {
+                    if let Some(t) = token {
+                        if !t.is_empty() {
+                            aggregated.push_str(&t);
+                            on_token(&t);
+                        }
+                    }
+                    if let Some(res) = result_text {
+                        if !res.trim().is_empty() {
+                            fallback = Some(res);
+                        }
+                    }
+                }
+                Err(e) => {
+                    if req.debug {
+                        eprintln!(
+                            "[debug] Failed to parse Claude stream line '{}': {}",
+                            trimmed, e
+                        );
+                    }
+                }
+            }
+        }
+
+        let status = child.wait().await?;
+        let stderr = if let Some(handle) = stderr {
+            match handle.await {
+                Ok(s) => s,
+                Err(_) => String::new(),
+            }
+        } else {
+            String::new()
+        };
+
+        if !status.success() {
+            return Err(anyhow!(
+                "CLI provider '{}' exited with status {}.{}",
+                req.binary,
+                status
+                    .code()
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "signal".to_string()),
+                if stderr.is_empty() {
+                    String::new()
+                } else {
+                    format!("\nstderr: {}", stderr)
+                }
+            ));
+        }
+
+        if aggregated.is_empty() {
+            if let Some(res) = fallback {
+                return Ok(res);
+            }
+            return Err(anyhow!("CLI provider returned no stream tokens."));
+        }
+
+        Ok(aggregated)
+    }
+
+    fn build_claude_command(req: &CliCompletionRequest<'_>, streaming: bool) -> Command {
+        let mut cmd = Command::new(req.binary);
+        if !req.base_args.is_empty() {
+            cmd.args(req.base_args.iter().filter(|arg| !arg.trim().is_empty()));
+        }
+        cmd.arg("-p");
+        if streaming {
+            cmd.arg("--verbose");
+            cmd.arg("--output-format");
+            cmd.arg("stream-json");
+            cmd.arg("--include-partial-messages");
+        } else {
+            cmd.arg("--output-format");
+            cmd.arg("json");
+        }
+        if !req.model.trim().is_empty() {
+            cmd.arg("--model");
+            cmd.arg(req.model);
+        }
+        cmd.arg("--append-system-prompt");
+        cmd.arg(tagged_system_prompt(req.system_prompt));
+        cmd.arg("--disallowed-tools");
+        cmd.arg("Bash(*) Edit");
+        cmd.arg("--");
+        cmd.arg(tagged_user_prompt(req.user_prompt));
+        cmd
     }
 
     #[derive(Debug, Deserialize)]
@@ -811,6 +946,60 @@ mod cli_backend {
         Err(anyhow!(
             "CLI provider returned JSON without a usable message."
         ))
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct ClaudeStreamEnvelope {
+        #[serde(rename = "type")]
+        event_type: String,
+        #[serde(default)]
+        event: Option<ClaudeStreamEvent>,
+        #[serde(default)]
+        result: Option<Value>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct ClaudeStreamEvent {
+        #[serde(rename = "type")]
+        event_type: String,
+        #[serde(default)]
+        delta: Option<ClaudeStreamDelta>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct ClaudeStreamDelta {
+        #[serde(default)]
+        text: Option<String>,
+    }
+
+    fn parse_claude_stream_line(
+        line: &str,
+    ) -> Result<(Option<String>, Option<String>), serde_json::Error> {
+        let env: ClaudeStreamEnvelope = serde_json::from_str(line)?;
+        let mut token = None;
+        let mut result_text = None;
+
+        if env.event_type == "stream_event" {
+            if let Some(event) = env.event {
+                if event.event_type == "content_block_delta" {
+                    if let Some(delta) = event.delta {
+                        if let Some(text) = delta.text {
+                            if !text.is_empty() {
+                                token = Some(text);
+                            }
+                        }
+                    }
+                }
+            }
+        } else if env.event_type == "result" {
+            if let Some(result) = env.result {
+                if let Some(text) = extract_text(&result) {
+                    result_text = Some(text);
+                }
+            }
+        }
+
+        Ok((token, result_text))
     }
 
     fn parse_single_json_value(stdout: &str) -> Result<Value> {
@@ -892,13 +1081,23 @@ mod cli_backend {
     pub(super) fn parse_claude_response_for_test(input: &str) -> Result<String> {
         parse_claude_response(input)
     }
+
+    #[cfg(test)]
+    pub(super) fn parse_claude_stream_line_for_test(
+        line: &str,
+    ) -> Result<(Option<String>, Option<String>), serde_json::Error> {
+        parse_claude_stream_line(line)
+    }
 }
 
-pub use cli_backend::{CliCompletionRequest, run_cli_completion};
+pub use cli_backend::{CliCompletionRequest, run_cli_completion, run_cli_completion_streaming};
 
 #[cfg(test)]
 mod tests {
-    use super::cli_backend::{parse_claude_response_for_test, parse_codex_response_for_test};
+    use super::cli_backend::{
+        parse_claude_response_for_test, parse_claude_stream_line_for_test,
+        parse_codex_response_for_test,
+    };
     use super::load_root_certificates;
     use rcgen::{CertifiedKey, generate_simple_self_signed};
     use std::fs;
@@ -953,5 +1152,21 @@ mod tests {
         let payload = r#"{"type":"result","subtype":"success","result":{"messages":[{"content":[{"type":"text","text":"Hello"},{"type":"text","text":"World"}]}]}}"#;
         let parsed = parse_claude_response_for_test(payload).expect("parse");
         assert_eq!(parsed, "Hello\n\nWorld");
+    }
+
+    #[test]
+    fn claude_stream_parser_emits_deltas() {
+        let payload = r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"<cmd>echo hi</cmd>"}}}"#;
+        let (token, result) = parse_claude_stream_line_for_test(payload).expect("parse");
+        assert_eq!(token.as_deref(), Some("<cmd>echo hi</cmd>"));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn claude_stream_parser_handles_result_objects() {
+        let payload = r#"{"type":"result","result":{"messages":[{"content":[{"type":"text","text":"All done"}]}]}}"#;
+        let (token, result) = parse_claude_stream_line_for_test(payload).expect("parse");
+        assert!(token.is_none());
+        assert_eq!(result.as_deref(), Some("All done"));
     }
 }

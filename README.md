@@ -74,14 +74,12 @@ Example `~/.qq/config.json` fragment that pins Codex as the default profile:
 
 ### Claude Code CLI profile (bring-your-own Claude desktop subscription)
 
-Prefer Claude’s coding workflow? Select the `claude_cli` profile and qqqa will drive the `claude` binary from `@anthropic-ai/claude-code` instead of a hosted API. That keeps usage effectively free if you already pay for Claude for Desktop.
+Have a Claude subscription? Select the `claude_cli` profile and qqqa will use the `claude` binary. That keeps usage effectively free if you already pay for Claude for Desktop.
 
 What to know:
 
-- Install Claude Code (`npm install -g @anthropic-ai/claude-code`) or use the desktop auto-updater so the `claude` binary is on your `PATH`, then run `claude login` once.
-- Streaming is unavailable; even without `--no-stream`, qqqa buffers Claude’s response and prints it once (matching the Codex behavior).
-- qqqa passes `--disallowed-tools "Bash(*) Edit"` so Claude cannot run commands or edit files—it must respond with the same XML-ish suggestions as HTTP providers.
-- `qa` still expects JSON tool calls and enforces the same `read_file` / `write_file` / `execute_command` schema.
+- Install Claude Code so the `claude` binary is on your `PATH`, then run `claude login` once.
+- Claude Code streams responses the same way API-based LLMs do.
 
 Minimal config snippet:
 
@@ -146,7 +144,7 @@ The initializer lets you choose the default provider:
 - Anthropic + `claude-3-5-sonnet-20241022` (placeholder until their Messages API finalizes)
 - Ollama (runs locally, adjust port if needed)
 - Codex CLI + `gpt-5` (wraps the `codex exec` binary so you can reuse a ChatGPT subscription; no API key needed, buffered output only)
-- Claude Code CLI + `sonnet` (wraps the `claude` binary; no API key needed, buffered output only)
+- Claude Code CLI + `sonnet` (wraps the `claude` binary; `qq` streams live, `qa` buffers so it can parse tool calls)
 
 It also offers to store an API key in the config (optional). If you prefer environment variables, leave it blank and set one of:
 

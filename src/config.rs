@@ -42,6 +42,12 @@ pub enum CliEngine {
     Claude,
 }
 
+impl CliEngine {
+    pub fn supports_streaming(self) -> bool {
+        matches!(self, CliEngine::Claude)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CliProviderConfig {
     pub engine: CliEngine,
