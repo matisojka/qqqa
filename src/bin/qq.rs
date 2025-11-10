@@ -1,7 +1,8 @@
 use anyhow::{Result, anyhow};
 use clap::{ArgAction, Parser};
 use qqqa::ai::{
-    ChatClient, CliCompletionRequest, Msg, run_cli_completion, run_cli_completion_streaming,
+    ChatClient, CliCompletionRequest, DEFAULT_REQUEST_TIMEOUT_SECS, Msg, run_cli_completion,
+    run_cli_completion_streaming,
 };
 use qqqa::clipboard;
 use qqqa::config::{Config, InitExistsError, ProviderConnection};
@@ -312,6 +313,10 @@ async fn main() -> Result<()> {
             }
         }
         (ProviderConnection::Cli(cli_conn), _) => {
+            let timeout = cli_conn
+                .request_timeout_secs
+                .map(Duration::from_secs)
+                .unwrap_or_else(|| Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS));
             let make_request = || CliCompletionRequest {
                 engine: cli_conn.engine,
                 binary: &cli_conn.binary,
@@ -321,6 +326,7 @@ async fn main() -> Result<()> {
                 model: &eff.model,
                 reasoning_effort: eff.reasoning_effort.as_deref(),
                 debug: cli.debug,
+                timeout,
             };
 
             let streaming_enabled = !cli.no_stream && cli_conn.engine.supports_streaming();

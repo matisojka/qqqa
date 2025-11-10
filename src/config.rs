@@ -329,6 +329,7 @@ pub struct CliConnection {
     pub engine: CliEngine,
     pub binary: String,
     pub base_args: Vec<String>,
+    pub request_timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -558,6 +559,7 @@ impl Config {
                     engine: cli.engine.clone(),
                     binary: cli.binary.clone(),
                     base_args: cli.base_args.clone(),
+                    request_timeout_secs,
                 })
             }
         };

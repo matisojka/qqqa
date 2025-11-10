@@ -323,9 +323,7 @@ async fn chat_client_respects_timeout_override() {
 #[tokio::test]
 async fn chat_once_messages_with_tools_handles_legacy_function_call() {
     if sandbox_blocks_binding() {
-        eprintln!(
-            "[skip] sandbox blocks binding to 127.0.0.1; skipping httpmock test"
-        );
+        eprintln!("[skip] sandbox blocks binding to 127.0.0.1; skipping httpmock test");
         return;
     }
     let server = MockServer::start();

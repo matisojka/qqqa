@@ -14,7 +14,7 @@ use std::path::Path;
 use std::time::Duration;
 
 const DEFAULT_MAX_COMPLETION_TOKENS: u32 = 800;
-const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 180;
+pub const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 180;
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 10;
 const DEFAULT_TEMPERATURE: f32 = 0.15;
 
@@ -582,7 +582,7 @@ fn find_single_newline(buf: &[u8]) -> Option<usize> {
 mod cli_backend {
     use super::*;
     use std::process::Stdio;
-    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+    use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::process::Command;
 
     #[derive(Debug)]
@@ -595,6 +595,7 @@ mod cli_backend {
         pub model: &'a str,
         pub reasoning_effort: Option<&'a str>,
         pub debug: bool,
+        pub timeout: Duration,
     }
 
     pub async fn run_cli_completion(req: CliCompletionRequest<'_>) -> Result<String> {
@@ -669,7 +670,7 @@ mod cli_backend {
                 .context("Writing prompt to CLI provider stdin")?;
         }
 
-        let output = child.wait_with_output().await?;
+        let output = wait_child_output_with_timeout(child, req.timeout, req.binary).await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -709,17 +710,18 @@ mod cli_backend {
             );
         }
 
-        let output = cmd
+        let child = cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .output()
-            .await
+            .spawn()
             .with_context(|| {
                 format!(
                     "Failed to spawn CLI provider '{}'. Is it installed and on your PATH?",
                     req.binary
                 )
             })?;
+
+        let output = wait_child_output_with_timeout(child, req.timeout, req.binary).await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -780,7 +782,7 @@ mod cli_backend {
             .stdout
             .take()
             .ok_or_else(|| anyhow!("CLI provider '{}' did not expose stdout", req.binary))?;
-        let stderr = child.stderr.take().map(|stderr| {
+        let mut stderr = child.stderr.take().map(|stderr| {
             tokio::spawn(async move {
                 let mut reader = BufReader::new(stderr);
                 let mut buf = Vec::new();
@@ -792,46 +794,64 @@ mod cli_backend {
         let mut reader = BufReader::new(stdout).lines();
         let mut aggregated = String::new();
         let mut fallback = None;
+        let deadline = tokio::time::sleep(req.timeout);
+        tokio::pin!(deadline);
 
-        while let Some(line) = reader.next_line().await? {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            match parse_claude_stream_line(trimmed) {
-                Ok((token, result_text)) => {
-                    if let Some(t) = token {
-                        if !t.is_empty() {
-                            aggregated.push_str(&t);
-                            on_token(&t);
-                        }
+        loop {
+            let next = tokio::select! {
+                line = reader.next_line() => line?,
+                _ = &mut deadline => {
+                    let _ = child.start_kill();
+                    let _ = child.wait().await;
+                    let _ = take_stderr_output(&mut stderr).await;
+                    return Err(timeout_error(req.binary, req.timeout));
+                }
+            };
+
+            match next {
+                Some(line) => {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
                     }
-                    if let Some(res) = result_text {
-                        if !res.trim().is_empty() {
-                            fallback = Some(res);
+                    match parse_claude_stream_line(trimmed) {
+                        Ok((token, result_text)) => {
+                            if let Some(t) = token {
+                                if !t.is_empty() {
+                                    aggregated.push_str(&t);
+                                    on_token(&t);
+                                }
+                            }
+                            if let Some(res) = result_text {
+                                if !res.trim().is_empty() {
+                                    fallback = Some(res);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            if req.debug {
+                                eprintln!(
+                                    "[debug] Failed to parse Claude stream line '{}': {}",
+                                    trimmed, e
+                                );
+                            }
                         }
                     }
                 }
-                Err(e) => {
-                    if req.debug {
-                        eprintln!(
-                            "[debug] Failed to parse Claude stream line '{}': {}",
-                            trimmed, e
-                        );
-                    }
-                }
+                None => break,
             }
         }
 
-        let status = child.wait().await?;
-        let stderr = if let Some(handle) = stderr {
-            match handle.await {
-                Ok(s) => s,
-                Err(_) => String::new(),
+        let status = tokio::select! {
+            status = child.wait() => status?,
+            _ = &mut deadline => {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                let _ = take_stderr_output(&mut stderr).await;
+                return Err(timeout_error(req.binary, req.timeout));
             }
-        } else {
-            String::new()
         };
+        let stderr = take_stderr_output(&mut stderr).await;
 
         if !status.success() {
             return Err(anyhow!(
@@ -885,6 +905,80 @@ mod cli_backend {
         cmd.arg("--");
         cmd.arg(tagged_user_prompt(req.user_prompt));
         cmd
+    }
+
+    async fn wait_child_output_with_timeout(
+        mut child: tokio::process::Child,
+        timeout: Duration,
+        binary: &str,
+    ) -> Result<std::process::Output> {
+        const POLL_INTERVAL_MS: u64 = 25;
+
+        let stdout_task = child.stdout.take().map(spawn_output_reader);
+        let stderr_task = child.stderr.take().map(spawn_output_reader);
+
+        let deadline = tokio::time::sleep(timeout);
+        tokio::pin!(deadline);
+
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            tokio::select! {
+                _ = &mut deadline => {
+                    let _ = child.start_kill();
+                    let _ = child.wait().await;
+                    return Err(timeout_error(binary, timeout));
+                }
+                _ = tokio::time::sleep(Duration::from_millis(POLL_INTERVAL_MS)) => {}
+            }
+        };
+
+        let stdout = match stdout_task {
+            Some(handle) => handle.await??,
+            None => Vec::new(),
+        };
+        let stderr = match stderr_task {
+            Some(handle) => handle.await??,
+            None => Vec::new(),
+        };
+
+        Ok(std::process::Output {
+            status,
+            stdout,
+            stderr,
+        })
+    }
+
+    fn spawn_output_reader<R>(stream: R) -> tokio::task::JoinHandle<Result<Vec<u8>>>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+    {
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stream);
+            let mut buf = Vec::new();
+            reader.read_to_end(&mut buf).await?;
+            Ok(buf)
+        })
+    }
+
+    async fn take_stderr_output(stderr: &mut Option<tokio::task::JoinHandle<String>>) -> String {
+        if let Some(handle) = stderr.take() {
+            match handle.await {
+                Ok(text) => text,
+                Err(_) => String::new(),
+            }
+        } else {
+            String::new()
+        }
+    }
+
+    fn timeout_error(binary: &str, timeout: Duration) -> anyhow::Error {
+        anyhow!(
+            "CLI provider '{}' timed out after {}s",
+            binary,
+            timeout.as_secs()
+        )
     }
 
     #[derive(Debug, Deserialize)]

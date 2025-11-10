@@ -7,7 +7,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use tempfile::tempdir;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 fn read_args(path: &Path) -> Vec<String> {
     let data = fs::read(path).expect("args file");
@@ -87,6 +87,7 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"h
         model: "gpt-5",
         reasoning_effort: Some("minimal"),
         debug: true,
+        timeout: Duration::from_secs(5),
     })
     .await
     .expect("cli run succeeds");
@@ -123,6 +124,7 @@ printf '%s\n' '{{"type":"item.completed","item":{{"type":"agent_message","text":
         model: "gpt-5",
         reasoning_effort: Some("minimal"),
         debug: false,
+        timeout: Duration::from_secs(5),
     })
     .await
     .expect("cli run succeeds");
@@ -176,6 +178,7 @@ printf '%s' '{{"type":"result","subtype":"success","result":"<cmd>echo hi</cmd>"
         model: "sonnet",
         reasoning_effort: None,
         debug: false,
+        timeout: Duration::from_secs(5),
     })
     .await
     .expect("cli run succeeds");

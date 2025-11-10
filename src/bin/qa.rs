@@ -1,6 +1,9 @@
 use anyhow::{Context, Result, anyhow};
 use clap::{ArgAction, Parser};
-use qqqa::ai::{AssistantReply, ChatClient, CliCompletionRequest, Msg, run_cli_completion};
+use qqqa::ai::{
+    AssistantReply, ChatClient, CliCompletionRequest, DEFAULT_REQUEST_TIMEOUT_SECS, Msg,
+    run_cli_completion,
+};
 use qqqa::config::{Config, InitExistsError, ProviderConnection};
 use qqqa::history::read_recent_history;
 use qqqa::perms;
@@ -277,6 +280,10 @@ async fn main() -> Result<()> {
                 .await?
         }
         (ProviderConnection::Cli(cli_conn), _) => {
+            let timeout = cli_conn
+                .request_timeout_secs
+                .map(Duration::from_secs)
+                .unwrap_or_else(|| Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS));
             let text = run_cli_completion(CliCompletionRequest {
                 engine: cli_conn.engine,
                 binary: &cli_conn.binary,
@@ -286,6 +293,7 @@ async fn main() -> Result<()> {
                 model: &eff.model,
                 reasoning_effort: eff.reasoning_effort.as_deref(),
                 debug: cli.debug,
+                timeout,
             })
             .await?;
             AssistantReply::Content(text)
