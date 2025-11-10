@@ -184,6 +184,11 @@ for t in "${targets[@]}"; do
     arch_prefix=$(echo "$t" | sed -E 's/-pc-windows-gnullvm$//')
     cc_tool="${arch_prefix}-w64-mingw32-clang"
     linker_tool="$cc_tool"
+    # Ring's build.rs expects to find the clang binary on PATH; mimic the manual
+    # steps (PATH + CC_aarch64_pc_windows_gnullvm) we use when building locally.
+    if [[ "$t" == "aarch64-pc-windows-gnullvm" && -d "/opt/llvm-mingw/bin" ]]; then
+      export PATH="/opt/llvm-mingw/bin:$PATH"
+    fi
     if ! command -v "$cc_tool" >/dev/null 2>&1; then
       echo "    WARN: Missing LLVM MinGW toolchain: $cc_tool." >&2
       if is_required_target "$t"; then
@@ -220,6 +225,9 @@ for t in "${targets[@]}"; do
     export "$cc_var"="$cc_tool"
     # shellcheck disable=SC2163
     export "$linker_var"="$linker_tool"
+    if [[ "$t" == "aarch64-pc-windows-gnullvm" ]]; then
+      export CC_aarch64_pc_windows_gnullvm="$cc_tool"
+    fi
     echo "    Using CC via $cc_var=$cc_tool and $linker_var=$linker_tool"
   fi
   if ! rustup target list | grep -q "^${t} (installed)"; then
