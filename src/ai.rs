@@ -116,11 +116,10 @@ impl ChatClient {
         api_key: String,
         headers: HashMap<String, String>,
         tls: Option<&ResolvedTlsConfig>,
-        request_timeout_secs: Option<u64>,
+        request_timeout: Option<Duration>,
     ) -> Result<Self> {
         // Use rustls for TLS; set useful timeouts for robustness.
-        let timeout =
-            Duration::from_secs(request_timeout_secs.unwrap_or(DEFAULT_REQUEST_TIMEOUT_SECS));
+        let timeout = request_timeout.unwrap_or(Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS));
         let mut builder = Client::builder()
             .timeout(timeout)
             .connect_timeout(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS));

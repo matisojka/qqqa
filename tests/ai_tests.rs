@@ -292,7 +292,7 @@ async fn chat_client_respects_timeout_override() {
         when.method(POST).path("/chat/completions");
         then.status(200)
             .header("content-type", "application/json")
-            .delay(Duration::from_secs(3))
+            .delay(Duration::from_millis(200))
             .body(r#"{"choices":[{"message":{"content":"too slow"}}]}"#);
     });
 
@@ -301,14 +301,14 @@ async fn chat_client_respects_timeout_override() {
         "test".into(),
         HashMap::new(),
         None,
-        Some(1),
+        Some(Duration::from_millis(50)),
     )
     .unwrap();
     let start = Instant::now();
     let err = client.chat_once("model-x", "Hi", false).await.unwrap_err();
     let elapsed = start.elapsed();
     assert!(
-        elapsed < Duration::from_secs(3),
+        elapsed < Duration::from_millis(200),
         "request was not capped by timeout: {:?}",
         elapsed
     );

@@ -9,6 +9,7 @@ use qqqa::shell::{ShellKind, detect_shell, shell_hint_for_prompt};
 use qqqa::tools::{ToolCall, parse_tool_call};
 use std::io::{Read, Stdin, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// qa — single-step agent that may use one tool
 #[derive(Debug, Parser)]
@@ -193,7 +194,7 @@ async fn main() -> Result<()> {
                 conn.api_key.clone(),
                 conn.headers.clone(),
                 conn.tls.as_ref(),
-                conn.request_timeout_secs,
+                conn.request_timeout_secs.map(Duration::from_secs),
             )?
             .with_reasoning_effort(eff.reasoning_effort.clone())
             .with_temperature(eff.temperature, eff.temperature.is_some()),

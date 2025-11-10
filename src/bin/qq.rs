@@ -15,6 +15,7 @@ use qqqa::shell::{detect_shell, shell_hint_for_prompt};
 use std::ffi::OsString;
 use std::io::Write as _;
 use std::io::{Read, Stdin};
+use std::time::Duration;
 
 /// qq — ask an LLM assistant a question
 ///
@@ -245,7 +246,7 @@ async fn main() -> Result<()> {
                 conn.api_key.clone(),
                 conn.headers.clone(),
                 conn.tls.as_ref(),
-                conn.request_timeout_secs,
+                conn.request_timeout_secs.map(Duration::from_secs),
             )?
             .with_reasoning_effort(eff.reasoning_effort.clone())
             .with_temperature(eff.temperature, eff.temperature.is_some()),
