@@ -1,11 +1,13 @@
 #![cfg(unix)]
 
+use anyhow::Result;
 use qqqa::ai::{CliCompletionRequest, run_cli_completion};
 use qqqa::config::CliEngine;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use tempfile::tempdir;
+use tokio::time::{sleep, Duration};
 
 fn read_args(path: &Path) -> Vec<String> {
     let data = fs::read(path).expect("args file");
@@ -33,6 +35,39 @@ fn write_executable_script(path: &Path, contents: &str) {
     fs::set_permissions(path, perms).unwrap();
 }
 
+async fn run_cli_completion_with_retry<'a, F>(mut make_req: F) -> Result<String>
+where
+    F: FnMut() -> CliCompletionRequest<'a>,
+{
+    const MAX_ATTEMPTS: usize = 3;
+    let mut attempt = 0;
+    loop {
+        match run_cli_completion(make_req()).await {
+            Ok(text) => return Ok(text),
+            Err(err) => {
+                if should_retry_etxtbsy(&err) && attempt < MAX_ATTEMPTS {
+                    attempt += 1;
+                    sleep(Duration::from_millis(25 * attempt as u64)).await;
+                    continue;
+                }
+                return Err(err);
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+fn should_retry_etxtbsy(err: &anyhow::Error) -> bool {
+    err.chain()
+        .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .any(|io_err| io_err.raw_os_error() == Some(libc::ETXTBSY))
+}
+
+#[cfg(not(unix))]
+fn should_retry_etxtbsy(_: &anyhow::Error) -> bool {
+    false
+}
+
 #[tokio::test]
 async fn run_cli_completion_returns_agent_message_from_script() {
     let dir = tempdir().unwrap();
@@ -43,7 +78,7 @@ printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"h
 "#;
     write_executable_script(&script_path, script);
 
-    let text = run_cli_completion(CliCompletionRequest {
+    let text = run_cli_completion_with_retry(|| CliCompletionRequest {
         engine: CliEngine::Codex,
         binary: script_path.to_str().unwrap(),
         base_args: &[],
@@ -79,7 +114,7 @@ printf '%s\n' '{{"type":"item.completed","item":{{"type":"agent_message","text":
     write_executable_script(&script_path, &script);
 
     let base_args = vec!["exec".to_string()];
-    let text = run_cli_completion(CliCompletionRequest {
+    let text = run_cli_completion_with_retry(|| CliCompletionRequest {
         engine: CliEngine::Codex,
         binary: script_path.to_str().unwrap(),
         base_args: &base_args,

@@ -1,4 +1,4 @@
-use qqqa::perms::{clear_custom_allowlist, ensure_safe_path};
+use qqqa::perms::{ensure_safe_path, set_custom_allowlist};
 use qqqa::shell::ShellKind;
 use qqqa::tools::parse_tool_call;
 use qqqa::tools::read_file;
@@ -15,7 +15,10 @@ struct TempCwdGuard {
 impl TempCwdGuard {
     fn new(dir: &Path) -> Self {
         static CWD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        let lock = CWD_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+        let lock = CWD_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let previous = std::env::current_dir().expect("read current dir");
         std::env::set_current_dir(dir).expect("set current dir");
         Self {
@@ -31,12 +34,47 @@ impl Drop for TempCwdGuard {
     }
 }
 
+struct EnvVarGuard {
+    key: &'static str,
+    previous: Option<String>,
+}
+
+impl EnvVarGuard {
+    fn set(key: &'static str, value: Option<&str>) -> Self {
+        let previous = std::env::var(key).ok();
+        if let Some(val) = value {
+            unsafe {
+                std::env::set_var(key, val);
+            }
+        } else {
+            unsafe {
+                std::env::remove_var(key);
+            }
+        }
+        Self { key, previous }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        if let Some(ref val) = self.previous {
+            unsafe {
+                std::env::set_var(self.key, val);
+            }
+        } else {
+            unsafe {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+}
+
 #[test]
 #[serial]
 fn read_and_write_file_tools_and_path_safety() {
     // Set HOME and CWD to a temp folder for deterministic safety checks.
     let temp = tempfile::tempdir().unwrap();
-    clear_custom_allowlist();
+    set_custom_allowlist(Vec::new());
     unsafe {
         std::env::set_var("HOME", temp.path());
     }
@@ -141,39 +179,38 @@ async fn execute_command_honors_pty_force_flag() {
     let _cwd_guard = TempCwdGuard::new(temp.path());
 
     let probe = "env sh -lc '[ -t 1 ] && echo tty || echo notty'";
-    let baseline = qqqa::tools::execute_command::run(
-        qqqa::tools::execute_command::Args {
-            command: probe.into(),
-            cwd: None,
-        },
-        true,
-        false,
-        ShellKind::Posix,
-        None,
-    )
-    .await
-    .expect("baseline execute_command should succeed");
+    let baseline = {
+        let _disable_guard = EnvVarGuard::set("QQQA_DISABLE_PTY", Some("1"));
+        qqqa::tools::execute_command::run(
+            qqqa::tools::execute_command::Args {
+                command: probe.into(),
+                cwd: None,
+            },
+            true,
+            false,
+            ShellKind::Posix,
+            None,
+        )
+        .await
+        .expect("baseline execute_command should succeed")
+    };
     assert!(baseline.contains("notty"));
 
-    unsafe {
-        std::env::set_var("QQQA_FORCE_PTY", "1");
-    }
-    let forced = qqqa::tools::execute_command::run(
-        qqqa::tools::execute_command::Args {
-            command: probe.into(),
-            cwd: None,
-        },
-        true,
-        false,
-        ShellKind::Posix,
-        None,
-    )
-    .await
-    .expect("execute_command with forced PTY should succeed");
-
-    unsafe {
-        std::env::remove_var("QQQA_FORCE_PTY");
-    }
+    let forced = {
+        let _force_guard = EnvVarGuard::set("QQQA_FORCE_PTY", Some("1"));
+        qqqa::tools::execute_command::run(
+            qqqa::tools::execute_command::Args {
+                command: probe.into(),
+                cwd: None,
+            },
+            true,
+            false,
+            ShellKind::Posix,
+            None,
+        )
+        .await
+        .expect("execute_command with forced PTY should succeed")
+    };
 
     assert!(
         forced.contains("tty"),
@@ -193,43 +230,37 @@ async fn execute_command_respects_disable_flag() {
     let _cwd_guard = TempCwdGuard::new(temp.path());
 
     let probe = "env sh -lc '[ -t 1 ] && echo tty || echo notty'";
-    unsafe {
-        std::env::set_var("QQQA_FORCE_PTY", "1");
-    }
-    let forced = qqqa::tools::execute_command::run(
-        qqqa::tools::execute_command::Args {
-            command: probe.into(),
-            cwd: None,
-        },
-        true,
-        false,
-        ShellKind::Posix,
-        None,
-    )
-    .await
-    .expect("forced PTY should succeed");
+    let forced = {
+        let _force_guard = EnvVarGuard::set("QQQA_FORCE_PTY", Some("1"));
+        qqqa::tools::execute_command::run(
+            qqqa::tools::execute_command::Args {
+                command: probe.into(),
+                cwd: None,
+            },
+            true,
+            false,
+            ShellKind::Posix,
+            None,
+        )
+        .await
+        .expect("forced PTY should succeed")
+    };
 
-    unsafe {
-        std::env::remove_var("QQQA_FORCE_PTY");
-        std::env::set_var("QQQA_DISABLE_PTY", "1");
-    }
-
-    let res = qqqa::tools::execute_command::run(
-        qqqa::tools::execute_command::Args {
-            command: probe.into(),
-            cwd: None,
-        },
-        true,
-        false,
-        ShellKind::Posix,
-        None,
-    )
-    .await
-    .expect("execute_command fallback should succeed");
-
-    unsafe {
-        std::env::remove_var("QQQA_DISABLE_PTY");
-    }
+    let res = {
+        let _disable_guard = EnvVarGuard::set("QQQA_DISABLE_PTY", Some("1"));
+        qqqa::tools::execute_command::run(
+            qqqa::tools::execute_command::Args {
+                command: probe.into(),
+                cwd: None,
+            },
+            true,
+            false,
+            ShellKind::Posix,
+            None,
+        )
+        .await
+        .expect("execute_command fallback should succeed")
+    };
 
     assert!(forced.contains("tty"));
     assert!(

@@ -1,6 +1,5 @@
 use qqqa::perms::{
-    CommandDisposition, clear_custom_allowlist, ensure_safe_command, ensure_safe_path,
-    set_custom_allowlist,
+    CommandDisposition, ensure_safe_command, ensure_safe_path, set_custom_allowlist,
 };
 use serial_test::serial;
 use std::path::Path;
@@ -8,7 +7,7 @@ use std::path::Path;
 #[test]
 #[serial]
 fn ensure_safe_command_allows_allowlisted_commands() {
-    clear_custom_allowlist();
+    set_custom_allowlist(Vec::new());
     unsafe {
         std::env::remove_var("QQQA_ALLOW_UNSAFE_COMMANDS");
     }
@@ -37,7 +36,7 @@ fn ensure_safe_command_allows_allowlisted_commands() {
 #[test]
 #[serial]
 fn ensure_safe_command_blocks_dangerous_patterns() {
-    clear_custom_allowlist();
+    set_custom_allowlist(Vec::new());
     unsafe {
         std::env::remove_var("QQQA_ALLOW_UNSAFE_COMMANDS");
     }
@@ -50,7 +49,7 @@ fn ensure_safe_command_blocks_dangerous_patterns() {
 #[test]
 #[serial]
 fn ensure_safe_command_blocks_connectors_and_inplace_edits() {
-    clear_custom_allowlist();
+    set_custom_allowlist(Vec::new());
     unsafe {
         std::env::remove_var("QQQA_ALLOW_UNSAFE_COMMANDS");
     }
@@ -73,7 +72,7 @@ fn ensure_safe_command_blocks_connectors_and_inplace_edits() {
 #[test]
 #[serial]
 fn ensure_safe_command_checks_all_segments() {
-    clear_custom_allowlist();
+    set_custom_allowlist(Vec::new());
     unsafe {
         std::env::remove_var("QQQA_ALLOW_UNSAFE_COMMANDS");
     }
@@ -89,7 +88,7 @@ fn ensure_safe_command_checks_all_segments() {
 #[test]
 #[serial]
 fn ensure_safe_command_respects_override_env() {
-    clear_custom_allowlist();
+    set_custom_allowlist(Vec::new());
     unsafe {
         std::env::set_var("QQQA_ALLOW_UNSAFE_COMMANDS", "1");
     }
@@ -105,7 +104,7 @@ fn ensure_safe_command_respects_override_env() {
 #[test]
 #[serial]
 fn ensure_safe_command_respects_custom_allowlist() {
-    clear_custom_allowlist();
+    set_custom_allowlist(Vec::new());
     unsafe {
         std::env::remove_var("QQQA_ALLOW_UNSAFE_COMMANDS");
     }
@@ -114,7 +113,7 @@ fn ensure_safe_command_respects_custom_allowlist() {
         ensure_safe_command("ffmpeg -i in.mp4 out.mp3").unwrap(),
         CommandDisposition::Allowed
     ));
-    clear_custom_allowlist();
+    set_custom_allowlist(Vec::new());
 }
 
 #[test]

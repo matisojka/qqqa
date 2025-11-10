@@ -52,10 +52,6 @@ pub fn set_custom_allowlist(commands: Vec<String>) {
     }
 }
 
-pub fn clear_custom_allowlist() {
-    custom_allowlist().lock().unwrap().clear();
-}
-
 /// Ensure a path is within HOME or current working directory.
 pub fn ensure_safe_path(p: &Path) -> Result<()> {
     let resolved = resolve_path(p)?;
