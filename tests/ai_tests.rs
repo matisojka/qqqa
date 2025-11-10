@@ -1,8 +1,8 @@
 use httpmock::Method::POST;
 use httpmock::MockServer;
 use httpmock::prelude::HttpMockRequest;
-use qqqa::ai::ChatClient;
-use serde_json::Value;
+use qqqa::ai::{AssistantReply, ChatClient, Msg};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::net::TcpListener;
 use std::time::{Duration, Instant};
@@ -317,5 +317,60 @@ async fn chat_client_respects_timeout_override() {
         msg.contains("deadline") || msg.contains("timed out")
     });
     assert!(timed_out, "unexpected error chain: {err:?}");
+    mock.assert();
+}
+
+#[tokio::test]
+async fn chat_once_messages_with_tools_handles_legacy_function_call() {
+    if sandbox_blocks_binding() {
+        eprintln!(
+            "[skip] sandbox blocks binding to 127.0.0.1; skipping httpmock test"
+        );
+        return;
+    }
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST).path("/chat/completions");
+        then.status(200)
+            .header("content-type", "application/json")
+            .body(
+                r#"{"choices":[{"message":{"function_call":{"name":"read_file","arguments":"{\"path\":\"/tmp/file.txt\"}"}}}]}"#,
+            );
+    });
+
+    let client =
+        ChatClient::new(server.base_url(), "test".into(), HashMap::new(), None, None).unwrap();
+    let reply = client
+        .chat_once_messages_with_tools(
+            "model-x",
+            &[
+                Msg {
+                    role: "system",
+                    content: "You are a helper",
+                },
+                Msg {
+                    role: "user",
+                    content: "Read a file",
+                },
+            ],
+            json!([]),
+            false,
+        )
+        .await
+        .unwrap();
+
+    match reply {
+        AssistantReply::ToolCall {
+            name,
+            arguments_json,
+        } => {
+            assert_eq!(name, "read_file");
+            assert!(arguments_json.contains("/tmp/file.txt"));
+        }
+        AssistantReply::Content(other) => {
+            panic!("expected tool call, got content: {}", other);
+        }
+    }
+
     mock.assert();
 }

@@ -73,6 +73,8 @@ struct ChatMessageWithTools {
     #[allow(dead_code)]
     #[serde(default)]
     tool_calls: Option<Vec<ToolCallResp>>,
+    #[serde(default)]
+    function_call: Option<ToolFunctionSpecResp>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -364,6 +366,11 @@ impl ChatClient {
                     arguments_json: first.function.arguments,
                 });
             }
+        } else if let Some(func) = choice.message.function_call {
+            return Ok(AssistantReply::ToolCall {
+                name: func.name,
+                arguments_json: func.arguments,
+            });
         }
         let content = choice.message.content.unwrap_or_default();
         Ok(AssistantReply::Content(content))
