@@ -95,6 +95,26 @@ fn claude_cli_profile_resolves_to_cli_backend() {
 }
 
 #[test]
+fn cli_model_override_forces_model_when_set() {
+    let mut cfg = Config::default();
+    if let Some(provider) = cfg.model_providers.get_mut("claude_cli") {
+        if let Some(cli) = provider.cli.as_mut() {
+            cli.model_override = Some("claude-custom".to_string());
+        }
+    }
+
+    let eff = cfg
+        .resolve_profile(Some("claude_cli"), None, None)
+        .expect("profile resolves");
+    assert_eq!(eff.model, "claude-custom");
+
+    let eff_flag = cfg
+        .resolve_profile(Some("claude_cli"), Some("user-pinned"), None)
+        .expect("profile resolves with flag");
+    assert_eq!(eff_flag.model, "user-pinned");
+}
+
+#[test]
 fn cli_mode_inferred_from_cli_block_when_mode_missing() {
     let json = r#"{
         "default_profile": "codex",

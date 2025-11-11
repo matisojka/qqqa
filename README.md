@@ -80,6 +80,7 @@ What to know:
 
 - Install Claude Code so the `claude` binary is on your `PATH`, then run `claude login` once.
 - Claude Code streams responses the same way API-based LLMs do.
+- Need to pin a different Claude desktop model? Add `"model_override": "claude-haiku-4-5"` under `model_providers.claude_cli.cli` in `~/.qq/config.json`. That override only applies to the Claude CLI; `qq -m/--model` still takes precedence per run.
 
 Minimal config snippet:
 
@@ -89,7 +90,14 @@ Minimal config snippet:
   "profiles": {
     "claude_cli": {
       "model_provider": "claude_cli",
-      "model": "sonnet"
+      "model": "claude-haiku-4-5"
+    }
+  },
+  "model_providers": {
+    "claude_cli": {
+      "cli": {
+        "model_override": "claude-haiku-4-5"
+      }
     }
   }
 }
@@ -144,7 +152,8 @@ The initializer lets you choose the default provider:
 - Anthropic + `claude-3-5-sonnet-20241022` (placeholder until their Messages API finalizes)
 - Ollama (runs locally, adjust port if needed)
 - Codex CLI + `gpt-5` (wraps the `codex exec` binary so you can reuse a ChatGPT subscription; no API key needed, buffered output only)
-- Claude Code CLI + `sonnet` (wraps the `claude` binary; `qq` streams live, `qa` buffers so it can parse tool calls)
+- Claude Code CLI + `claude-haiku-4-5` (wraps the `claude` binary; `qq` streams live, `qa` buffers so it can parse tool calls)
+  - Need to force a different desktop model? Add `"model_override"` under the provider's `cli` block (supported for both Codex and Claude). That override wins over the profile default but still yields to the per-run `--model` flag.
 
 It also offers to store an API key in the config (optional). If you prefer environment variables, leave it blank and set one of:
 
@@ -162,8 +171,8 @@ Defaults written to `~/.qq/config.json`:
   - `groq` → base `https://api.groq.com/openai/v1`, env `GROQ_API_KEY`
   - `ollama` → base `http://127.0.0.1:11434/v1`, env `OLLAMA_API_KEY` (qqqa auto-injects a non-empty placeholder if you leave it unset)
   - `anthropic` → base `https://api.anthropic.com/v1`, env `ANTHROPIC_API_KEY` (present in the config schema for future support; not usable yet)
-  - `codex` → mode `cli`, binary `codex` with base args `exec` (install Codex CLI; auth handled by `codex login`)
-  - `claude_cli` → mode `cli`, binary `claude` (install `@anthropic-ai/claude-code`; auth handled by `claude login`)
+  - `codex` → mode `cli`, binary `codex` with base args `exec` (install Codex CLI; auth handled by `codex login`). Optional `"model_override"` in the `cli` block forces a fallback ChatGPT model if OpenAI retires the default.
+  - `claude_cli` → mode `cli`, binary `claude` (install `@anthropic-ai/claude-code`; auth handled by `claude login`). Optional `"model_override"` pins Claude Code’s `--model` flag without touching your profile’s model.
   - `codex` → CLI provider, binary `codex` - fails if the binary is missing
 - Profiles
   - `openrouter` → model `openai/gpt-4.1-nano` (default)
