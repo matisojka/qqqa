@@ -54,6 +54,9 @@ pub struct CliProviderConfig {
     pub binary: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub base_args: Vec<String>,
+    /// Optional hard override for the CLI model flag (useful if the vendor retires a default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_override: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -209,6 +212,7 @@ impl Default for Config {
                     engine: CliEngine::Codex,
                     binary: "codex".to_string(),
                     base_args: vec!["exec".to_string()],
+                    model_override: None,
                 }),
             },
         );
@@ -226,6 +230,7 @@ impl Default for Config {
                     engine: CliEngine::Claude,
                     binary: "claude".to_string(),
                     base_args: Vec::new(),
+                    model_override: None,
                 }),
             },
         );
@@ -295,7 +300,7 @@ impl Default for Config {
             "claude_cli".to_string(),
             Profile {
                 model_provider: "claude_cli".to_string(),
-                model: "sonnet".to_string(),
+                model: "claude-haiku-4-5".to_string(),
                 reasoning_effort: None,
                 temperature: None,
                 timeout: None,
@@ -476,7 +481,7 @@ impl Config {
             .get(provider_key)
             .ok_or_else(|| anyhow!("Model provider '{}' not found in config", provider_key))?;
 
-        let model = model_override.unwrap_or(&profile.model).to_string();
+        let user_model_override = model_override.map(|m| m.to_string());
 
         let request_timeout_secs = if let Some(raw) = profile.timeout.as_deref() {
             let trimmed = raw.trim();
@@ -509,6 +514,22 @@ impl Config {
         } else {
             ProviderMode::Http
         };
+
+        let mut model = user_model_override
+            .clone()
+            .unwrap_or_else(|| profile.model.clone());
+        if user_model_override.is_none() && matches!(effective_mode, ProviderMode::Cli) {
+            if let Some(cli) = provider.cli.as_ref() {
+                if let Some(override_model) = cli
+                    .model_override
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|m| !m.is_empty())
+                {
+                    model = override_model.to_string();
+                }
+            }
+        }
 
         let connection = match effective_mode {
             ProviderMode::Http => {
