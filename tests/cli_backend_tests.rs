@@ -8,6 +8,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use tempfile::tempdir;
 use tokio::time::{Duration, sleep};
+use std::thread;
+use std::time::Duration as StdDuration;
 
 fn read_args(path: &Path) -> Vec<String> {
     let data = fs::read(path).expect("args file");
@@ -33,6 +35,9 @@ fn write_executable_script(path: &Path, contents: &str) {
     let mut perms = fs::metadata(path).unwrap().permissions();
     perms.set_mode(0o755);
     fs::set_permissions(path, perms).unwrap();
+
+    // Give the filesystem a brief moment to release the executable so execve won't race with writes.
+    thread::sleep(StdDuration::from_millis(50));
 }
 
 async fn run_cli_completion_with_retry<'a, F>(mut make_req: F) -> Result<String>
