@@ -93,6 +93,7 @@ pub fn build_qq_prompt(
 /// System prompt for `qq`: restrict topics to terminal/dev and enforce XML-tag formatting.
 pub fn build_qq_system_prompt() -> String {
     let mut s = String::new();
+    s.push_str("Provide a quick answer / no thinking.\n");
     s.push_str("You are a terminal assistant. Help users ONLY with command-line, programming, system administration, and technical computing tasks.\n\n");
     s.push_str("TOPIC RESTRICTIONS:\n");
     s.push_str("- ONLY answer questions about: terminal commands, shell scripting, file operations, system administration, programming, development tools, git, network tools, text processing, etc.\n");
@@ -192,6 +193,7 @@ pub fn build_qq_user_message(
 /// The CLI enforces a single tool call and will not loop.
 pub fn build_qa_system_prompt() -> String {
     let mut s = String::new();
+    s.push_str("Provide a quick answer / no thinking.\n");
     s.push_str("You are a careful CLI agent with a single tool-call step.\n");
     s.push_str("You may either answer directly in plain text OR request exactly one tool call by returning ONLY a JSON object with this shape:\n");
     s.push_str("{ \"tool\": string, \"arguments\": object }\n\n");
