@@ -332,14 +332,15 @@ async fn main() -> Result<()> {
                         Ok(summary) => print_tool_result("write_file", &summary),
                         Err(e) => print_tool_error("write_file", &e.to_string()),
                     },
-                    ToolCall::ExecuteCommand(args) => match run_execute_command_with_allowlist(
-                        args, cli.yes, cli.debug, shell_kind, &mut cfg, &path,
-                    )
-                    .await
-                    {
-                        Ok(summary) => print_tool_result("execute_command", &summary),
-                        Err(e) => print_tool_error("execute_command", &e.to_string()),
-                    },
+                    ToolCall::ExecuteCommand(args) =>
+                        match run_execute_command_with_allowlist(
+                            args, cli.yes, cli.debug, shell_kind, &mut cfg, &path,
+                        )
+                        .await
+                        {
+                            Ok(result) => print_execute_command_result(&result, cli.debug),
+                            Err(e) => print_tool_error("execute_command", &e.to_string()),
+                        },
                 },
                 Err(_) => {
                     println!("{}", assistant.trim_end());
@@ -351,6 +352,12 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+struct ExecuteCommandResult {
+    summary: String,
+    streamed_live: bool,
+}
+
 async fn run_execute_command_with_allowlist(
     args: qqqa::tools::execute_command::Args,
     auto_yes: bool,
@@ -358,7 +365,7 @@ async fn run_execute_command_with_allowlist(
     shell: ShellKind,
     cfg: &mut Config,
     cfg_path: &Path,
-) -> Result<String> {
+) -> Result<ExecuteCommandResult> {
     let mut base_dir = std::env::current_dir().context("Failed to read current directory")?;
     if let Ok(canon) = base_dir.canonicalize() {
         base_dir = canon;
@@ -379,17 +386,25 @@ async fn run_execute_command_with_allowlist(
                 let _ = handle.flush();
             }
         };
+        let mut on_chunk: Option<&mut dyn for<'chunk> FnMut(qqqa::tools::execute_command::StreamChunk<'chunk>)> =
+            Some(&mut stream_printer);
+        let streaming_enabled = on_chunk.is_some();
         let exec_args = sanitize_execute_args(original_args.clone(), &base_dir, debug);
         match qqqa::tools::execute_command::run(
             exec_args,
             auto_yes,
             debug,
             shell,
-            Some(&mut stream_printer),
+            on_chunk.as_deref_mut(),
         )
         .await
         {
-            Ok(summary) => return Ok(summary),
+            Ok(summary) => {
+                return Ok(ExecuteCommandResult {
+                    summary,
+                    streamed_live: streaming_enabled,
+                })
+            }
             Err(err) => {
                 if let Some(program) = err
                     .downcast_ref::<perms::CommandNotAllowedError>()
@@ -544,7 +559,7 @@ async fn execute_tool_call(
                 )
                 .await
                 {
-                    Ok(summary) => print_tool_result("execute_command", &summary),
+                    Ok(result) => print_execute_command_result(&result, debug),
                     Err(e) => print_tool_error("execute_command", &e.to_string()),
                 }
                 return Ok(true);
@@ -576,6 +591,35 @@ fn print_tool_result(tool: &str, result: &str) {
 
 fn print_tool_error(tool: &str, err: &str) {
     println!("[tool:{}:error] {}", tool, err);
+}
+
+fn print_execute_command_result(result: &ExecuteCommandResult, debug: bool) {
+    if let Some(msg) = format_execute_command_result(result, debug) {
+        print_tool_result("execute_command", &msg);
+    }
+}
+
+fn format_execute_command_result(
+    result: &ExecuteCommandResult,
+    debug: bool,
+) -> Option<String> {
+    if result.streamed_live {
+        if debug {
+            let exit_line = result
+                .summary
+                .lines()
+                .next()
+                .unwrap_or("Exit code: (unknown)");
+            Some(format!(
+                "{}\nOutput streamed above; not repeating stdout/stderr.",
+                exit_line
+            ))
+        } else {
+            None
+        }
+    } else {
+        Some(result.summary.trim_end().to_string())
+    }
 }
 
 fn read_all_stdin(mut stdin: Stdin) -> Result<String> {
@@ -709,5 +753,36 @@ mod tests {
         let (result, fell_back) = sanitize_cwd_path(Some(nested.to_string_lossy().as_ref()), &base);
         assert_eq!(result, nested);
         assert!(!fell_back);
+    }
+
+    #[test]
+    fn format_execute_command_result_suppresses_streamed_output_without_debug() {
+        let result = ExecuteCommandResult {
+            summary: "Exit code: 0\n--- stdout ---\nok\n--- stderr ---\n".into(),
+            streamed_live: true,
+        };
+        assert!(format_execute_command_result(&result, false).is_none());
+    }
+
+    #[test]
+    fn format_execute_command_result_emits_condensed_when_debug() {
+        let result = ExecuteCommandResult {
+            summary: "Exit code: 0\n--- stdout ---\nok\n--- stderr ---\n".into(),
+            streamed_live: true,
+        };
+        let msg = format_execute_command_result(&result, true).expect("should emit");
+        assert!(msg.contains("Exit code: 0"));
+        assert!(msg.contains("Output streamed above"));
+    }
+
+    #[test]
+    fn format_execute_command_result_returns_full_summary_when_not_streamed() {
+        let result = ExecuteCommandResult {
+            summary: "Exit code: 1\n--- stdout ---\n\n--- stderr ---\nerr\n".into(),
+            streamed_live: false,
+        };
+        let msg = format_execute_command_result(&result, false).expect("should emit");
+        assert!(msg.contains("Exit code: 1"));
+        assert!(msg.contains("--- stderr ---"));
     }
 }
