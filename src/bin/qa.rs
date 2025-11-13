@@ -633,20 +633,9 @@ fn format_execute_command_result(
     result: &ExecuteCommandResult,
     debug: bool,
 ) -> Option<String> {
+    let _ = debug;
     if result.streamed_live {
-        if debug {
-            let exit_line = result
-                .summary
-                .lines()
-                .next()
-                .unwrap_or("Exit code: (unknown)");
-            Some(format!(
-                "{}\nOutput streamed above; not repeating stdout/stderr.",
-                exit_line
-            ))
-        } else {
-            None
-        }
+        None
     } else {
         Some(result.summary.trim_end().to_string())
     }
@@ -792,17 +781,7 @@ mod tests {
             streamed_live: true,
         };
         assert!(format_execute_command_result(&result, false).is_none());
-    }
-
-    #[test]
-    fn format_execute_command_result_emits_condensed_when_debug() {
-        let result = ExecuteCommandResult {
-            summary: "Exit code: 0\n--- stdout ---\nok\n--- stderr ---\n".into(),
-            streamed_live: true,
-        };
-        let msg = format_execute_command_result(&result, true).expect("should emit");
-        assert!(msg.contains("Exit code: 0"));
-        assert!(msg.contains("Output streamed above"));
+        assert!(format_execute_command_result(&result, true).is_none());
     }
 
     #[test]
