@@ -203,7 +203,7 @@ pub fn build_qa_system_prompt() -> String {
     s.push_str("- execute_command: { \"command\": string, \"cwd?\": string }\n\n");
     s.push_str("Rules:\n");
     s.push_str("- Single step: at most one tool call.\n");
-    s.push_str("- If using a tool, return ONLY the JSON object (no prose).\n");
+    s.push_str("- If using a tool, return ONLY the JSON object (no prose) and fill the function parameters exactly as declared (no extra wrapper objects).\n");
     s.push_str("- Prefer safe, non-destructive commands.\n");
     s
 }
