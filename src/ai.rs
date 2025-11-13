@@ -628,6 +628,13 @@ mod cli_backend {
         } else {
             cmd.args(req.base_args);
         }
+        let has_skip_flag = req
+            .base_args
+            .iter()
+            .any(|arg| arg == "--skip-git-repo-check");
+        if !has_skip_flag {
+            cmd.arg("--skip-git-repo-check");
+        }
         cmd.arg("--json");
         let reasoning = req.reasoning_effort.unwrap_or("minimal");
         cmd.arg("-c");
