@@ -321,6 +321,9 @@ async fn main() -> Result<()> {
             }
         }
         AssistantReply::Content(assistant) => {
+            if cli.debug {
+                eprintln!("[debug] assistant raw: {}", assistant);
+            }
             // Try to parse as a tool call per our plain-JSON protocol; else print the answer.
             match parse_tool_call(assistant.trim()) {
                 Ok(call) => match call {
@@ -528,36 +531,42 @@ async fn execute_tool_call(
     cfg: &mut Config,
     cfg_path: &Path,
 ) -> Result<bool> {
+    if debug {
+        eprintln!("[debug] tool call '{}' args: {}", name, arguments_json);
+    }
     let mut current_name = name.to_string();
     let mut current_args = arguments_json.to_string();
 
     loop {
-        match current_name.as_str() {
-            "read_file" => {
-                let args: qqqa::tools::read_file::Args = serde_json::from_str(&current_args)
-                    .map_err(|e| anyhow!("Failed to parse read_file args: {}", e))?;
-                match qqqa::tools::read_file::run(args) {
-                    Ok(content) => print_tool_result("read_file", &content),
-                    Err(e) => print_tool_error("read_file", &e.to_string()),
-                }
-                return Ok(true);
+    match current_name.as_str() {
+        "read_file" => {
+            let normalized = normalize_tool_arguments(&current_args)?;
+            let args: qqqa::tools::read_file::Args = serde_json::from_str(&normalized)
+                .map_err(|e| anyhow!("Failed to parse read_file args: {}", e))?;
+            match qqqa::tools::read_file::run(args) {
+                Ok(content) => print_tool_result("read_file", &content),
+                Err(e) => print_tool_error("read_file", &e.to_string()),
             }
-            "write_file" => {
-                let args: qqqa::tools::write_file::Args = serde_json::from_str(&current_args)
-                    .map_err(|e| anyhow!("Failed to parse write_file args: {}", e))?;
-                match qqqa::tools::write_file::run(args) {
-                    Ok(summary) => print_tool_result("write_file", &summary),
-                    Err(e) => print_tool_error("write_file", &e.to_string()),
-                }
-                return Ok(true);
+            return Ok(true);
+        }
+        "write_file" => {
+            let normalized = normalize_tool_arguments(&current_args)?;
+            let args: qqqa::tools::write_file::Args = serde_json::from_str(&normalized)
+                .map_err(|e| anyhow!("Failed to parse write_file args: {}", e))?;
+            match qqqa::tools::write_file::run(args) {
+                Ok(summary) => print_tool_result("write_file", &summary),
+                Err(e) => print_tool_error("write_file", &e.to_string()),
             }
-            "execute_command" => {
-                let args: qqqa::tools::execute_command::Args = serde_json::from_str(&current_args)
-                    .map_err(|e| anyhow!("Failed to parse execute_command args: {}", e))?;
-                match run_execute_command_with_allowlist(
-                    args, auto_yes, debug, shell, cfg, cfg_path,
-                )
-                .await
+            return Ok(true);
+        }
+        "execute_command" => {
+            let normalized = normalize_tool_arguments(&current_args)?;
+            let args: qqqa::tools::execute_command::Args = serde_json::from_str(&normalized)
+                .map_err(|e| anyhow!("Failed to parse execute_command args: {}", e))?;
+            match run_execute_command_with_allowlist(
+                args, auto_yes, debug, shell, cfg, cfg_path,
+            )
+            .await
                 {
                     Ok(result) => print_execute_command_result(&result, debug),
                     Err(e) => print_tool_error("execute_command", &e.to_string()),
@@ -593,6 +602,27 @@ fn print_tool_error(tool: &str, err: &str) {
     println!("[tool:{}:error] {}", tool, err);
 }
 
+fn normalize_tool_arguments(raw: &str) -> Result<String> {
+    // If the raw blob already matches our expected schema, leave it alone.
+    // Otherwise, detect legacy wrappers of the shape {"tool": ..., "arguments": {...}}
+    // and unwrap them so serde can deserialize into the tool arg structs.
+    #[derive(serde::Deserialize)]
+    struct LegacyWrapper {
+        tool: Option<String>,
+        arguments: serde_json::Value,
+    }
+
+    let trimmed = raw.trim_start();
+    if !trimmed.starts_with('{') {
+        return Ok(raw.to_string());
+    }
+
+    match serde_json::from_str::<LegacyWrapper>(trimmed) {
+        Ok(wrapper) if wrapper.tool.is_some() => Ok(wrapper.arguments.to_string()),
+        _ => Ok(raw.to_string()),
+    }
+}
+
 fn print_execute_command_result(result: &ExecuteCommandResult, debug: bool) {
     if let Some(msg) = format_execute_command_result(result, debug) {
         print_tool_result("execute_command", &msg);
@@ -603,20 +633,9 @@ fn format_execute_command_result(
     result: &ExecuteCommandResult,
     debug: bool,
 ) -> Option<String> {
+    let _ = debug;
     if result.streamed_live {
-        if debug {
-            let exit_line = result
-                .summary
-                .lines()
-                .next()
-                .unwrap_or("Exit code: (unknown)");
-            Some(format!(
-                "{}\nOutput streamed above; not repeating stdout/stderr.",
-                exit_line
-            ))
-        } else {
-            None
-        }
+        None
     } else {
         Some(result.summary.trim_end().to_string())
     }
@@ -762,17 +781,7 @@ mod tests {
             streamed_live: true,
         };
         assert!(format_execute_command_result(&result, false).is_none());
-    }
-
-    #[test]
-    fn format_execute_command_result_emits_condensed_when_debug() {
-        let result = ExecuteCommandResult {
-            summary: "Exit code: 0\n--- stdout ---\nok\n--- stderr ---\n".into(),
-            streamed_live: true,
-        };
-        let msg = format_execute_command_result(&result, true).expect("should emit");
-        assert!(msg.contains("Exit code: 0"));
-        assert!(msg.contains("Output streamed above"));
+        assert!(format_execute_command_result(&result, true).is_none());
     }
 
     #[test]
@@ -784,5 +793,34 @@ mod tests {
         let msg = format_execute_command_result(&result, false).expect("should emit");
         assert!(msg.contains("Exit code: 1"));
         assert!(msg.contains("--- stderr ---"));
+    }
+
+    #[test]
+    fn normalize_tool_arguments_unwraps_legacy_wrapper() {
+        let raw = r#"{"tool":"execute_command","arguments":{"command":"ls"}}"#;
+        let normalized = normalize_tool_arguments(raw).expect("normalize");
+        assert_eq!(normalized, "{\"command\":\"ls\"}");
+    }
+
+    #[test]
+    fn normalize_tool_arguments_leaves_openai_function_call_intact() {
+        // This is the standard payload we get from OpenAI-style function calls.
+        let raw = r#"{"command":"ls -al","cwd":"."}"#;
+        let normalized = normalize_tool_arguments(raw).expect("normalize");
+        assert_eq!(normalized, raw);
+    }
+
+    #[test]
+    fn normalize_tool_arguments_passthrough_for_standard_schema() {
+        let raw = r#"{\"command\":\"ls\",\"cwd\":\".\"}"#;
+        let normalized = normalize_tool_arguments(raw).expect("normalize");
+        assert_eq!(normalized, raw);
+    }
+
+    #[test]
+    fn normalize_tool_arguments_handles_non_json_gracefully() {
+        let raw = "not-json";
+        let normalized = normalize_tool_arguments(raw).expect("normalize");
+        assert_eq!(normalized, raw);
     }
 }
