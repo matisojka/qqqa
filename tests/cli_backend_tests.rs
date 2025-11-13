@@ -139,6 +139,7 @@ printf '%s\n' '{{"type":"item.completed","item":{{"type":"agent_message","text":
     let args = read_args(&args_dump);
     let expected: Vec<String> = vec![
         "exec",
+        "--skip-git-repo-check",
         "--json",
         "-c",
         "model_reasoning_effort=minimal",
