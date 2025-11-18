@@ -6,10 +6,10 @@ use qqqa::config::CliEngine;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use tempfile::tempdir;
-use tokio::time::{Duration, sleep};
 use std::thread;
 use std::time::Duration as StdDuration;
+use tempfile::tempdir;
+use tokio::time::{Duration, sleep};
 
 fn read_args(path: &Path) -> Vec<String> {
     let data = fs::read(path).expect("args file");

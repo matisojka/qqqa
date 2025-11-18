@@ -103,6 +103,7 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse_from(normalized_cli_args());
+    configure_color_output();
 
     // Run interactive init if requested.
     if cli.init {
@@ -553,6 +554,39 @@ fn persist_config_flags(cli: &Cli) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn configure_color_output() {
+    let stdout_is_tty = atty::is(atty::Stream::Stdout);
+    let enable_color = if env_var_truthy("CLICOLOR_FORCE") {
+        true
+    } else if std::env::var_os("NO_COLOR").is_some() || env_var_falsey("CLICOLOR") {
+        false
+    } else {
+        stdout_is_tty
+    };
+    qqqa::formatting::set_color_output_enabled(enable_color);
+}
+
+fn env_var_truthy(name: &str) -> bool {
+    matches!(env_var_bool(name), Some(true))
+}
+
+fn env_var_falsey(name: &str) -> bool {
+    matches!(env_var_bool(name), Some(false))
+}
+
+fn env_var_bool(name: &str) -> Option<bool> {
+    let raw = std::env::var(name).ok()?;
+    let normalized = raw.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    match normalized.as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

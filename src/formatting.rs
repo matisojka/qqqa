@@ -7,6 +7,8 @@ use std::sync::{
 use std::thread;
 use std::time::Duration;
 
+static COLOR_OUTPUT_ENABLED: AtomicBool = AtomicBool::new(true);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MarkupTag {
     Bold,
@@ -15,6 +17,16 @@ enum MarkupTag {
     File,
     Warn,
     Code,
+}
+
+/// Toggle ANSI coloring at runtime. Call once per run from the CLI after
+/// detecting whether stdout supports color output.
+pub fn set_color_output_enabled(enabled: bool) {
+    COLOR_OUTPUT_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+fn color_output_enabled() -> bool {
+    COLOR_OUTPUT_ENABLED.load(Ordering::Relaxed)
 }
 
 fn style_for_stack(stack: &[MarkupTag]) -> Style {
@@ -59,7 +71,7 @@ fn push_with_style(out: &mut String, text: &str, stack: &[MarkupTag]) {
     if text.is_empty() {
         return;
     }
-    if stack.is_empty() {
+    if stack.is_empty() || !color_output_enabled() {
         out.push_str(&text);
     } else {
         out.push_str(&style_for_stack(stack).paint(text).to_string());
@@ -248,7 +260,11 @@ impl StreamingFormatter {
 
 /// Print a transient status to stderr (no spinner to keep deps small).
 pub fn status_thinking() {
-    eprintln!("{}", Color::Yellow.paint("Thinking…"));
+    if color_output_enabled() {
+        eprintln!("{}", Color::Yellow.paint("Thinking…"));
+    } else {
+        eprintln!("Thinking…");
+    }
 }
 
 /// Print streamed token to stdout. We avoid buffering to keep latency low.
@@ -346,7 +362,11 @@ pub fn compact_blank_lines(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{StreamingFormatter, render_xmlish_to_ansi};
+    use super::{
+        COLOR_OUTPUT_ENABLED, StreamingFormatter, render_xmlish_to_ansi, set_color_output_enabled,
+    };
+    use std::sync::atomic::Ordering;
+    use std::sync::{Mutex, OnceLock};
 
     fn stream_chunks(input: &str, chunk_size: usize) -> String {
         let mut fmt = StreamingFormatter::new();
@@ -404,5 +424,34 @@ mod tests {
             render_xmlish_to_ansi("<cmd>ffmpeg -i input.mov output.mp4</cmd> <info>done</info>");
         assert_eq!(final_render, expected);
         assert_eq!(printed, expected);
+    }
+
+    #[test]
+    fn render_xmlish_emits_color_when_enabled() {
+        let rendered = with_color_setting(true, || render_xmlish_to_ansi("<cmd>ls</cmd>"));
+        assert!(
+            rendered.contains("\u{1b}[32m"),
+            "expected ANSI codes when color enabled"
+        );
+    }
+
+    #[test]
+    fn render_xmlish_strips_color_when_disabled() {
+        let rendered = with_color_setting(false, || render_xmlish_to_ansi("<cmd>ls</cmd>"));
+        assert_eq!(rendered, "ls");
+    }
+
+    fn with_color_setting<F, R>(enabled: bool, func: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let guard = LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+        let prev = COLOR_OUTPUT_ENABLED.load(Ordering::Relaxed);
+        set_color_output_enabled(enabled);
+        let result = func();
+        set_color_output_enabled(prev);
+        drop(guard);
+        result
     }
 }

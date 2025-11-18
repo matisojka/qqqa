@@ -335,15 +335,14 @@ async fn main() -> Result<()> {
                         Ok(summary) => print_tool_result("write_file", &summary),
                         Err(e) => print_tool_error("write_file", &e.to_string()),
                     },
-                    ToolCall::ExecuteCommand(args) =>
-                        match run_execute_command_with_allowlist(
-                            args, cli.yes, cli.debug, shell_kind, &mut cfg, &path,
-                        )
-                        .await
-                        {
-                            Ok(result) => print_execute_command_result(&result, cli.debug),
-                            Err(e) => print_tool_error("execute_command", &e.to_string()),
-                        },
+                    ToolCall::ExecuteCommand(args) => match run_execute_command_with_allowlist(
+                        args, cli.yes, cli.debug, shell_kind, &mut cfg, &path,
+                    )
+                    .await
+                    {
+                        Ok(result) => print_execute_command_result(&result, cli.debug),
+                        Err(e) => print_tool_error("execute_command", &e.to_string()),
+                    },
                 },
                 Err(_) => {
                     println!("{}", assistant.trim_end());
@@ -389,8 +388,9 @@ async fn run_execute_command_with_allowlist(
                 let _ = handle.flush();
             }
         };
-        let mut on_chunk: Option<&mut dyn for<'chunk> FnMut(qqqa::tools::execute_command::StreamChunk<'chunk>)> =
-            Some(&mut stream_printer);
+        let mut on_chunk: Option<
+            &mut dyn for<'chunk> FnMut(qqqa::tools::execute_command::StreamChunk<'chunk>),
+        > = Some(&mut stream_printer);
         let streaming_enabled = on_chunk.is_some();
         let exec_args = sanitize_execute_args(original_args.clone(), &base_dir, debug);
         match qqqa::tools::execute_command::run(
@@ -406,7 +406,7 @@ async fn run_execute_command_with_allowlist(
                 return Ok(ExecuteCommandResult {
                     summary,
                     streamed_live: streaming_enabled,
-                })
+                });
             }
             Err(err) => {
                 if let Some(program) = err
@@ -538,35 +538,35 @@ async fn execute_tool_call(
     let mut current_args = arguments_json.to_string();
 
     loop {
-    match current_name.as_str() {
-        "read_file" => {
-            let normalized = normalize_tool_arguments(&current_args)?;
-            let args: qqqa::tools::read_file::Args = serde_json::from_str(&normalized)
-                .map_err(|e| anyhow!("Failed to parse read_file args: {}", e))?;
-            match qqqa::tools::read_file::run(args) {
-                Ok(content) => print_tool_result("read_file", &content),
-                Err(e) => print_tool_error("read_file", &e.to_string()),
+        match current_name.as_str() {
+            "read_file" => {
+                let normalized = normalize_tool_arguments(&current_args)?;
+                let args: qqqa::tools::read_file::Args = serde_json::from_str(&normalized)
+                    .map_err(|e| anyhow!("Failed to parse read_file args: {}", e))?;
+                match qqqa::tools::read_file::run(args) {
+                    Ok(content) => print_tool_result("read_file", &content),
+                    Err(e) => print_tool_error("read_file", &e.to_string()),
+                }
+                return Ok(true);
             }
-            return Ok(true);
-        }
-        "write_file" => {
-            let normalized = normalize_tool_arguments(&current_args)?;
-            let args: qqqa::tools::write_file::Args = serde_json::from_str(&normalized)
-                .map_err(|e| anyhow!("Failed to parse write_file args: {}", e))?;
-            match qqqa::tools::write_file::run(args) {
-                Ok(summary) => print_tool_result("write_file", &summary),
-                Err(e) => print_tool_error("write_file", &e.to_string()),
+            "write_file" => {
+                let normalized = normalize_tool_arguments(&current_args)?;
+                let args: qqqa::tools::write_file::Args = serde_json::from_str(&normalized)
+                    .map_err(|e| anyhow!("Failed to parse write_file args: {}", e))?;
+                match qqqa::tools::write_file::run(args) {
+                    Ok(summary) => print_tool_result("write_file", &summary),
+                    Err(e) => print_tool_error("write_file", &e.to_string()),
+                }
+                return Ok(true);
             }
-            return Ok(true);
-        }
-        "execute_command" => {
-            let normalized = normalize_tool_arguments(&current_args)?;
-            let args: qqqa::tools::execute_command::Args = serde_json::from_str(&normalized)
-                .map_err(|e| anyhow!("Failed to parse execute_command args: {}", e))?;
-            match run_execute_command_with_allowlist(
-                args, auto_yes, debug, shell, cfg, cfg_path,
-            )
-            .await
+            "execute_command" => {
+                let normalized = normalize_tool_arguments(&current_args)?;
+                let args: qqqa::tools::execute_command::Args = serde_json::from_str(&normalized)
+                    .map_err(|e| anyhow!("Failed to parse execute_command args: {}", e))?;
+                match run_execute_command_with_allowlist(
+                    args, auto_yes, debug, shell, cfg, cfg_path,
+                )
+                .await
                 {
                     Ok(result) => print_execute_command_result(&result, debug),
                     Err(e) => print_tool_error("execute_command", &e.to_string()),
@@ -629,10 +629,7 @@ fn print_execute_command_result(result: &ExecuteCommandResult, debug: bool) {
     }
 }
 
-fn format_execute_command_result(
-    result: &ExecuteCommandResult,
-    debug: bool,
-) -> Option<String> {
+fn format_execute_command_result(result: &ExecuteCommandResult, debug: bool) -> Option<String> {
     let _ = debug;
     if result.streamed_live {
         None
