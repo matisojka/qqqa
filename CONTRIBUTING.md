@@ -17,7 +17,7 @@ Thanks for your interest in qqqa. This doc is for contributors and for anyone cu
 
 ## Building Releases
 
-We keep prebuilt binaries in `target/releases/` inside the repo and retain ~3 latest versions; this directory is already gitignored, so the tarballs stay local and never bloat the repo. The `scripts/release.sh` helper automates the heavy lifting, prints next steps, and updates the Homebrew tap for you.
+We keep prebuilt binaries in `target/releases/` inside the repo and retain ~3 latest versions; this directory is already gitignored, so the tarballs stay local and never bloat the repo. The `scripts/release.sh` helper automates the heavy lifting and prints next steps.
 
 Prerequisites
 - Clean working tree and passing tests.
@@ -26,11 +26,11 @@ Prerequisites
 
 Quick start (tagging HEAD)
 ```
-# build artifacts, update Cargo.toml + manifest + Homebrew tap
+# build artifacts, update Cargo.toml + manifest
 scripts/release.sh v0.9.1
 
 # follow the printed checklist (summary below)
-git add Cargo.toml homebrew-tap/Formula/qqqa.rb
+git add Cargo.toml
 git commit -m "release: v0.9.1"
 git tag -a v0.9.1 -m "qqqa v0.9.1"
 git push && git push --tags
@@ -39,9 +39,6 @@ git push && git push --tags
 gh release create v0.9.1 target/releases/v0.9.1/qqqa-v0.9.1-*.tar.gz \
   target/releases/v0.9.1/qqqa-v0.9.1-src.tar.gz target/releases/v0.9.1/manifest.json \\
   --title "qqqa v0.9.1" --notes-file docs/RELEASE_NOTES_TEMPLATE.md
-
-# push the tap repo after reviewing Formula/qqqa.rb
-(cd homebrew-tap && git add Formula/qqqa.rb && git commit -m "qqqa v0.9.1" && git push)
 ```
 
 Tag a specific SHA by passing it as the second argument: `scripts/release.sh v0.9.1 <git_sha>` (the script still prints the same checklist, but the tag command includes your SHA).
@@ -56,8 +53,7 @@ What the script does
 - Builds `qq` and `qa` for macOS (x86_64/arm64), Linux MUSL (x86_64/arm64), and Windows (x86_64 GNU + arm64 gnullvm) by default; override `TARGETS` if needed.
 - Packages `qqqa-v<version>-<target>.tar.gz` under `target/releases/v<version>/` with README and LICENSE.
 - Writes `target/releases/v<version>/manifest.json` for upload to GitHub Releases.
-- Downloads the GitHub tag archive (`https://github.com/iagooar/qqqa/archive/refs/tags/v<version>.tar.gz`), computes its SHA256, and rewrites `homebrew-tap/Formula/qqqa.rb` with the new URL/sha/version so the tap is always aligned.
-- Prints a human checklist covering commits, Git tags, `gh release create`, and pushing the Homebrew tap (artifacts stay under `target/releases/`, which is already gitignored; upload them when drafting the GitHub release).
+- Prints a human checklist covering commits, Git tags, and `gh release create` (artifacts stay under `target/releases/`, which is already gitignored; upload them when drafting the GitHub release).
 - Provides `docs/RELEASE_NOTES_TEMPLATE.md` as a quick-start for the release description (`gh release create --notes-file docs/RELEASE_NOTES_TEMPLATE.md`).
 
 Notes
