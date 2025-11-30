@@ -114,12 +114,9 @@ Minimal config snippet:
 
 ## Install
 
-### macOS
-
-Use the Homebrew tap:
+### Homebrew (macOS/Linux)
 
 ```sh
-brew tap iagooar/qqqa
 brew install qqqa
 ```
 

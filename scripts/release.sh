@@ -301,7 +301,7 @@ fi
 # Pack source tarball for Homebrew / manual uploads
 src_stage=$(mktemp -d)
 src_dir="qqqa-${ver}"
-rsync -a --exclude='.git' --exclude='target' --exclude='homebrew-tap' --exclude='.DS_Store' ./ "${src_stage}/${src_dir}/"
+rsync -a --exclude='.git' --exclude='target' --exclude='.DS_Store' ./ "${src_stage}/${src_dir}/"
 src_tarball="${artifact_root}/qqqa-v${ver}-src.tar.gz"
 tar -C "$src_stage" -czf "$src_tarball" "$src_dir"
 rm -rf "$src_stage"
@@ -348,109 +348,19 @@ echo "==> Writing manifest ${manifest_file}"
   echo "}"
 } > "$manifest_file"
 
-echo "==> Phase 1 complete. Artifacts staged under ${artifact_root}/"
-echo "    Upload the following files to your GitHub release/tag before continuing:"
+echo "==> Done. Artifacts staged under ${artifact_root}/"
+echo "    Upload the following files to your GitHub release/tag:"
 for f in "${artifact_root}"/qqqa-v${ver}-*.tar.gz "$manifest_file"; do
   [[ -e "$f" ]] || continue
   echo "      - $f"
 done
 echo "    Attach them when running: gh release create v${ver} ..."
 echo
-
-skip_phase_two=0
-if [[ "${SKIP_PHASE2:-}" == "1" ]]; then
-  skip_phase_two=1
-elif [[ "${AUTO_CONTINUE:-}" == "1" ]]; then
-  echo "==> AUTO_CONTINUE=1 detected; proceeding to Phase 2 without waiting."
-else
-  if [[ -t 0 ]]; then
-    read -r -p $'Press enter once the artifacts are uploaded and the tag archive is live (type "skip" to stop after Phase 1): ' phase_resp || true
-    if [[ "$phase_resp" =~ ^[Ss][Kk][Ii][Pp]$ ]]; then
-      skip_phase_two=1
-    fi
-  else
-    echo "==> Non-interactive shell detected. Set AUTO_CONTINUE=1 to run both phases or SKIP_PHASE2=1 to finish early."
-    skip_phase_two=1
-  fi
-fi
-
-if [[ "$skip_phase_two" == "1" ]]; then
-  echo "==> Phase 2 (Homebrew tap update) skipped. Re-run this script with AUTO_CONTINUE=1 after publishing the GitHub release if needed."
-  exit 0
-fi
-
-# Homebrew tap handling now relies on the GitHub tag archive (always available once the tag exists)
-tap_formula="homebrew-tap/Formula/qqqa.rb"
-tap_url="https://github.com/iagooar/qqqa/archive/refs/tags/v${ver}.tar.gz"
-tap_checksum_cmd=""
-if command -v shasum >/dev/null 2>&1; then
-  tap_checksum_cmd="shasum -a 256"
-elif command -v sha256sum >/dev/null 2>&1; then
-  tap_checksum_cmd="sha256sum"
-fi
-if [[ -f "$tap_formula" ]]; then
-  if ! command -v curl >/dev/null 2>&1; then
-    echo "==> WARN: curl not found; skipping Homebrew formula update." >&2
-  elif [[ -z "$tap_checksum_cmd" ]]; then
-    echo "==> WARN: no shasum/sha256sum available; skipping Homebrew formula update." >&2
-  else
-    tap_update_done=0
-    tap_attempt=1
-    while [[ $tap_update_done -eq 0 ]]; do
-      tap_tmp=$(mktemp)
-      echo "==> Downloading ${tap_url} to compute Homebrew checksum (attempt ${tap_attempt})"
-      if curl -fsSL "$tap_url" -o "$tap_tmp"; then
-        tap_sha=$($tap_checksum_cmd "$tap_tmp" | awk '{print $1}')
-        rm -f "$tap_tmp"
-        python3 <<PY
-from pathlib import Path
-import re
-
-formula = Path("$tap_formula")
-ver = "$ver"
-sha = "$tap_sha"
-url = "$tap_url"
-
-text = formula.read_text()
-text = re.sub(r'url "[^"]+"', f'url "{url}"', text)
-text = re.sub(r'sha256 "[^"]+"', f'sha256 "{sha}"', text)
-if 'version "' in text:
-    text = re.sub(r'version "[^"]+"', f'version "{ver}"', text)
-else:
-    text = text.replace(f'sha256 "{sha}"', f'sha256 "{sha}"\n  version "{ver}"', 1)
-
-formula.write_text(text)
-PY
-        echo "==> Updated Homebrew formula at $tap_formula"
-        echo "    Remember to commit and push the tap repository (homebrew-tap)."
-        tap_update_done=1
-      else
-        rm -f "$tap_tmp"
-        echo "==> WARN: failed to download ${tap_url}; GitHub may still be processing the release." >&2
-        if [[ -t 0 ]]; then
-          read -r -p $'Press enter to retry once the archive is available, or type "skip" to bypass the tap update: ' retry_resp || true
-          if [[ "$retry_resp" =~ ^[Ss][Kk][Ii][Pp]$ ]]; then
-            echo "==> Skipping Homebrew formula update by request."
-            break
-          fi
-        else
-          echo "==> WARN: non-interactive shell; skipping Homebrew formula update." >&2
-          break
-        fi
-      fi
-      tap_attempt=$((tap_attempt + 1))
-    done
-  fi
-else
-  echo "==> Skipping Homebrew formula update (homebrew-tap/Formula/qqqa.rb not found)."
-fi
-
-echo "==> Done. Artifacts remain under ${artifact_root}/"
 echo "==> Next steps"
 cat <<EOF
   1. Review README/docs for accuracy (update manually if needed).
-  2. Commit the version bump + tap update (artifacts stay under target/ and remain ignored):
-       git add Cargo.toml homebrew-tap/Formula/qqqa.rb
+  2. Commit the version bump (artifacts stay under target/ and remain ignored):
+       git add Cargo.toml
        git commit -m 'release: v${ver}'
   3. Tag the release:
 EOF
@@ -463,7 +373,5 @@ cat <<EOF
   4. Push code and tag:
        git push && git push --tags
   5. Publish (or update) the GitHub release with the artifacts listed above if you haven't already.
-  6. Update the Homebrew tap repo:
-       (cd homebrew-tap && git add Formula/qqqa.rb && git commit -m 'qqqa v${ver}' && git push)
-  7. Announce the release / publish notes as needed.
+  6. Announce the release / publish notes as needed.
 EOF
